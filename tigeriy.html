@@ -6906,24 +6906,14 @@ function runICTAnalysis(d, fundamentals = {}){
     const eventWindowBlock = fundamentals.eventWindow?.disable || false;
     
     // ========== STRUCTURE-FIRST: CONFIRMATION FLAG GATING ==========
-    // Per research: MUST have confirmation (displacement + FVG + BOS) before ANY trade
+    // RELAXED: Allow analysis to continue without strict confirmation
+    // Confirmation adds bonus but doesn't block
     
     if(!confirmation.confirmed){
-      // BLOCKED: No confirmation - show user what's missing
-      return {
-        goTrade: false,
-        score: finalScore,
-        maxScore,
-        direction: confirmation.direction === 1 ? 'LONG' : (confirmation.direction === -1 ? 'SHORT' : 'NONE'),
-        reason: confirmation.reason,
-        setupType: 'WAITING',
-        checks,
-        reasons: [confirmation.reason],
-        tradePlan: null,
-        sizeMultiplier: 0,
-        confirmation: confirmation,
-        discountPremium: discountPremium
-      };
+      // NO BLOCK: Just warn and continue with current score
+      reasons.push(`⚠️ ${confirmation.reason} - reduced confidence`);
+      console.warn('[ICT]', confirmation.reason);
+      // Continue with analysis - score already accumulated from 12 checks
     }
     
     // Confirmation exists - check discount/premium alignment
