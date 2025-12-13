@@ -7997,16 +7997,16 @@ function computeTradePlan(d, side){
   const view = STATE.interval;
   const sizing = (()=>{
     switch(view){
-      case '1m':  return { sl:1.2, p:1.0, r:1.5 };
-      case '5m':  return { sl:1.3, p:1.2, r:1.8 };
-      case '15m': return { sl:1.5, p:1.5, r:2.0 };
-      case '30m': return { sl:1.5, p:1.8, r:2.2 };
-      case '1h':  return { sl:1.7, p:2.0, r:3.0 };
-      case '4h':  return { sl:1.8, p:2.5, r:4.0 };
-      case '1d':  return { sl:2.0, p:3.0, r:6.0 };
-      case '1w':  return { sl:2.2, p:4.0, r:8.0 };
-      case '1M':  return { sl:2.5, p:5.0, r:10.0 };
-      default:    return { sl:1.4, p:1.5, r:2.0 };
+      case '1m':  return { sl:1.0, p:1.0, r:1.5 };
+      case '5m':  return { sl:1.0, p:1.2, r:1.8 };
+      case '15m': return { sl:1.0, p:1.5, r:2.0 };
+      case '30m': return { sl:1.0, p:1.8, r:2.2 };
+      case '1h':  return { sl:1.0, p:2.0, r:3.0 };
+      case '4h':  return { sl:1.0, p:2.5, r:4.0 };
+      case '1d':  return { sl:1.0, p:3.0, r:6.0 };
+      case '1w':  return { sl:1.0, p:4.0, r:8.0 };
+      case '1M':  return { sl:1.0, p:5.0, r:10.0 };
+      default:    return { sl:1.0, p:1.5, r:2.0 };
     }
   })();
   const atrMultSL = sizing.sl;
@@ -17686,14 +17686,14 @@ function calculatePendingOrder(d, direction, score, reasons){
     poiDistance = 0;
   }
   
-  // Calculate stop loss
+  // Calculate stop loss (always 1R - base risk unit)
   let stopLoss = null;
   if(direction === 'LONG'){
-    // SL below structure low
-    stopLoss = structure.lastLow ? structure.lastLow - (atrNow * 0.3) : entryPOI - (atrNow * 1.5);
+    // SL below structure low with small buffer (1R total)
+    stopLoss = structure.lastLow ? structure.lastLow - (atrNow * 0.3) : entryPOI - (atrNow * 1.0);
   } else {
-    // SL above structure high
-    stopLoss = structure.lastHigh ? structure.lastHigh + (atrNow * 0.3) : entryPOI + (atrNow * 1.5);
+    // SL above structure high with small buffer (1R total)
+    stopLoss = structure.lastHigh ? structure.lastHigh + (atrNow * 0.3) : entryPOI + (atrNow * 1.0);
   }
   
   const slDistance = Math.abs(entryPOI - stopLoss);
