@@ -1,0 +1,16 @@
+{
+  "name": "inzalo-trader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Institutional-grade technical + news AI trading assistant with local Ollama / Gemini / OpenAI providers.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "express-rate-limit": "^7.1.5"
+  }
+}
