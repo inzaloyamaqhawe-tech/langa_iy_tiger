@@ -6492,9 +6492,9 @@ function runICTAnalysis(d, fundamentals = {}){
       checks.htf_bias = {pass: true, score: 10, note: 'HTF bias present but weak BOS'};
       reasons.push(`âš ï¸ HTF ${htfBias > 0 ? 'bullish' : 'bearish'} (weak confirmation)`);
     } else {
-      // Give 5 points baseline if ranging but has other confluence
-      score += 5; // NEW: some credit for ranging markets
-      checks.htf_bias = {pass: false, score: 5, note: 'No clear HTF trend - ranging'};
+      // Give 8 points baseline if ranging but has other confluence
+      score += 8; // INCREASED: better credit for ranging markets with setups
+      checks.htf_bias = {pass: false, score: 8, note: 'No clear HTF trend - ranging'};
       reasons.push('âš ï¸ Ranging market - scalp mode');
     }
     
@@ -6668,8 +6668,8 @@ function runICTAnalysis(d, fundamentals = {}){
         reasons.push(`âŒ FVG over-used (${mitigations} mitigations) - avoid`);
       }
     } else {
-      score += 2;
-      checks.fvg = {pass: false, score: 2, note: 'No FVG - relying on OB/SR'};
+      score += 5; // INCREASED: give credit when relying on OB/SR zones
+      checks.fvg = {pass: false, score: 5, note: 'No FVG - relying on OB/SR'};
       reasons.push('âš ï¸ No FVG (using OB/SR)');
     }
     
@@ -6691,7 +6691,8 @@ function runICTAnalysis(d, fundamentals = {}){
         reasons.push('âš ï¸ Weak displacement - wick flip');
       }
     } else {
-      checks.structure_shift = {pass: false, score: 0, note: 'No BOS/CHoCH detected'};
+      score += 4; // NEW: give partial credit
+      checks.structure_shift = {pass: false, score: 4, note: 'No BOS/CHoCH - using S/R'};
       reasons.push('âŒ No structure shift');
     }
     
@@ -6726,7 +6727,8 @@ function runICTAnalysis(d, fundamentals = {}){
       checks.ob_proximity = {pass: true, score: 4, note: 'Near S/R zone'};
       reasons.push('âš ï¸ Near S/R - moderate strength');
     } else {
-      checks.ob_proximity = {pass: false, score: 0, note: 'Not at key price area'};
+      score += 3; // NEW: baseline credit
+      checks.ob_proximity = {pass: false, score: 3, note: 'Not at key price area'};
       reasons.push('âŒ No OB or S/R proximity');
     }
     
@@ -6752,8 +6754,8 @@ function runICTAnalysis(d, fundamentals = {}){
       checks.premium_discount = {pass: true, score: 8, note: `Short in premium (${(retraceLevel*100).toFixed(0)}%)`};
       reasons.push(`âœ… Short in premium zone (${(retraceLevel*100).toFixed(0)}%)`);
     } else {
-      score += 3;
-      checks.premium_discount = {pass: false, score: 3, note: 'Not in optimal entry zone'};
+      score += 4; // INCREASED: give credit for any price level entry
+      checks.premium_discount = {pass: false, score: 4, note: 'Not in optimal entry zone'};
       reasons.push('âš ï¸ Not in optimal zone');
     }
     
@@ -6796,7 +6798,8 @@ function runICTAnalysis(d, fundamentals = {}){
       checks.volume = {pass: true, score: 4, note: 'Volume up but volatility low (chop)'};
       reasons.push('âš ï¸ Volume up but low volatility');
     } else {
-      checks.volume = {pass: false, score: 0, note: 'No volume confirmation'};
+      score += 3; // NEW: partial credit - volume not critical for all setups
+      checks.volume = {pass: false, score: 3, note: 'No volume confirmation'};
       reasons.push('âŒ No volume confirmation');
     }
     
@@ -6956,20 +6959,20 @@ function runICTAnalysis(d, fundamentals = {}){
       };
     }
     
-    // Score-based tiers (NOW confirmation is already validated):
-    // 50%+ = Trade (adjusted threshold for better signal generation)
-    // 40-49% = Wait for LTF confirmation
-    // <40% = Wait
+    // Score-based tiers (RELAXED for real market conditions):
+    // 40%+ = Trade (realistic threshold for valid setups)
+    // 30-39% = Wait for LTF confirmation
+    // <30% = Wait
     
-    const goTrade = finalScore >= 50; // ADJUSTED: ≥50% to allow more valid trades
+    const goTrade = finalScore >= 40; // RELAXED: ≥40% to capture valid trading opportunities
     
     // Size recommendation based on score
     let sizeMultiplier = 0;
     let sizeNote = '';
     
     if(!goTrade){
-      // Score 40-49 with confirmation: suggest LTF confirmation
-      if(finalScore >= 60){
+      // Score 30-39 with confirmation: suggest LTF confirmation
+      if(finalScore >= 30){
         sizeMultiplier = 0;
         sizeNote = `Score ${finalScore.toFixed(0)}% - Wait for LTF confirmation (check 5m/15m)`;
         reasons.push(sizeNote);
@@ -19558,6 +19561,9 @@ if(btnSaveSettings){
 </script>
 </body>
 </html>
+
+
+
 
 
 
