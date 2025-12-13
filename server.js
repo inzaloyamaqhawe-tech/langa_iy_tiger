@@ -1,4 +1,4 @@
-// Unified LLM backend proxy
+﻿// Unified LLM backend proxy
 // Supports provider: gemini | openai | github (stub)
 // IMPORTANT: GitHub Copilot models are NOT publicly exposed via a simple REST API.
 // The 'github' provider here is a placeholder returning 501 until you wire an actual endpoint.
@@ -110,8 +110,9 @@ app.get('/health', (req,res)=> res.json({ ok:true, ts:Date.now() }));
 // Static serving of frontend (optional). Place tigeriy.html in same directory.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-app.use(express.static(__dirname));
-app.get('/', (req,res)=> res.sendFile(path.join(__dirname, 'tigeriy.html')));
+app.use(express.static(__dirname, { setHeaders: (res) => { res.set('Content-Type', 'text/html; charset=utf-8'); } }));
+app.get('/', (req,res)=> { res.set('Content-Type', 'text/html; charset=utf-8'); res.sendFile(path.join(__dirname, 'tigeriy.html')); });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, ()=> console.log('LLM proxy + static frontend listening on', PORT));
+
