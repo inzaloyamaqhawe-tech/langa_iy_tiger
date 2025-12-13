@@ -17549,6 +17549,388 @@ function heuristicPredict(baseOverride){
 }
 
 /**
+ * PENDING ORDER SYSTEM - Never says HOLD, always provides actionable trade setup
+ * Calculates entry at nearest POI (FVG midpoint, OB zone, discount/premium level)
+ * Includes activation conditions, confirmation requirements, and guardrails
+ * 
+ * @param {Array} d - Candle data
+ * @param {string} direction - 'LONG' or 'SHORT' (HTF bias)
+ * @param {number} score - Composite score from heuristic
+ * @param {Array} reasons - Existing reasons array to append to
+ * @returns {Object} Pending order details
+ */
+function calculatePendingOrder(d, direction, score, reasons){
+  if(!d || d.length < 20) return null;
+  
+  const last = d[d.length-1];
+  const px = last.c;
+  const atrNow = Number.isFinite(last.atr) ? last.atr : (px * 0.02);
+  const structure = computeStructure(d);
+  
+  // Find nearest POI for entry
+  let entryPOI = null;
+  let poiType = 'market';
+  let poiDistance = Infinity;
+  
+  try {
+    // 1. Check FVG midpoints (highest priority)
+    const allFVGs = computeFVGs(d);
+    let topFVGs = selectValuableFVGs(d, allFVGs) || [];
+    
+    if(topFVGs.length > 0){
+      for(const fvg of topFVGs){
+        const mid = (fvg.y1 + fvg.y2) / 2;
+        const dist = Math.abs(px - mid);
+        
+        // For longs, prefer FVG below price (discount)
+        // For shorts, prefer FVG above price (premium)
+        const correctSide = (direction === 'LONG' && mid < px) || (direction === 'SHORT' && mid > px);
+        
+        if(correctSide && dist < poiDistance && dist < atrNow * 2){
+          entryPOI = mid;
+          poiType = `FVG50 (${fvg.type})`;
+          poiDistance = dist;
+        }
+      }
+    }
+    
+    // 2. Check Order Blocks (if no FVG found)
+    if(!entryPOI){
+      const obs = computeOrderBlocks(d);
+      
+      if(direction === 'LONG' && obs.bull){
+        const mid = (obs.bull.y1 + obs.bull.y2) / 2;
+        const dist = Math.abs(px - mid);
+        if(mid < px && dist < atrNow * 2){
+          entryPOI = mid;
+          poiType = 'Bullish OB';
+          poiDistance = dist;
+        }
+      } else if(direction === 'SHORT' && obs.bear){
+        const mid = (obs.bear.y1 + obs.bear.y2) / 2;
+        const dist = Math.abs(px - mid);
+        if(mid > px && dist < atrNow * 2){
+          entryPOI = mid;
+          poiType = 'Bearish OB';
+          poiDistance = dist;
+        }
+      }
+    }
+    
+    // 3. Check discount/premium zones (if still no POI)
+    if(!entryPOI && structure.lastHigh && structure.lastLow){
+      const high = structure.lastHigh;
+      const low = structure.lastLow;
+      const range = high - low;
+      
+      if(direction === 'LONG'){
+        // Enter at 38.2% retracement (deep discount)
+        entryPOI = low + (range * 0.382);
+        poiType = 'Discount Zone (38.2%)';
+        poiDistance = Math.abs(px - entryPOI);
+      } else {
+        // Enter at 61.8% retracement (deep premium)
+        entryPOI = low + (range * 0.618);
+        poiType = 'Premium Zone (61.8%)';
+        poiDistance = Math.abs(px - entryPOI);
+      }
+    }
+    
+    // 4. Fallback: Use key moving average
+    if(!entryPOI){
+      if(direction === 'LONG' && last.ema20 && last.ema20 < px){
+        entryPOI = last.ema20;
+        poiType = 'EMA20 support';
+        poiDistance = Math.abs(px - entryPOI);
+      } else if(direction === 'SHORT' && last.ema20 && last.ema20 > px){
+        entryPOI = last.ema20;
+        poiType = 'EMA20 resistance';
+        poiDistance = Math.abs(px - entryPOI);
+      }
+    }
+    
+    // 5. Last resort: Use current price (market order)
+    if(!entryPOI){
+      entryPOI = px;
+      poiType = 'Market (no ideal POI nearby)';
+      poiDistance = 0;
+    }
+    
+  } catch(e){
+    console.error('[PENDING] Error calculating POI:', e);
+    entryPOI = px;
+    poiType = 'Market';
+    poiDistance = 0;
+  }
+  
+  // Calculate stop loss
+  let stopLoss = null;
+  if(direction === 'LONG'){
+    // SL below structure low
+    stopLoss = structure.lastLow ? structure.lastLow - (atrNow * 0.3) : entryPOI - (atrNow * 1.5);
+  } else {
+    // SL above structure high
+    stopLoss = structure.lastHigh ? structure.lastHigh + (atrNow * 0.3) : entryPOI + (atrNow * 1.5);
+  }
+  
+  const slDistance = Math.abs(entryPOI - stopLoss);
+  
+  // Calculate take profits (R-multiples)
+  const tp1 = direction === 'LONG' ? entryPOI + (slDistance * 2.5) : entryPOI - (slDistance * 2.5);
+  const tp2 = direction === 'LONG' ? entryPOI + (slDistance * 3.5) : entryPOI - (slDistance * 3.5);
+  const tp3 = direction === 'LONG' ? entryPOI + (slDistance * 5.0) : entryPOI - (slDistance * 5.0);
+  
+  // Position sizing (reduce if indicators oppose or far from POI)
+  let positionMultiplier = 1.0;
+  
+  // Check if we're far from POI
+  const atPOI = poiDistance <= atrNow * 0.3;
+  if(!atPOI && poiDistance > atrNow * 1.0){
+    positionMultiplier = 0.5; // Reduce size if far from ideal entry
+    reasons.push(`⚠️ Entry ${(poiDistance/atrNow).toFixed(1)}x ATR from ideal POI - size reduced 50%`);
+  }
+  
+  // Check indicator opposition
+  const rsi = last.rsi || 50;
+  const stDir = last.st_dir || 0;
+  const indicatorsOppose = (direction === 'LONG' && (rsi > 70 || stDir < 0)) ||
+                           (direction === 'SHORT' && (rsi < 30 || stDir > 0));
+  
+  if(indicatorsOppose){
+    positionMultiplier *= 0.5;
+    reasons.push(`⚠️ Indicators oppose ${direction} - size reduced 50%`);
+  }
+  
+  // Activation/confirmation conditions
+  const confirmationConditions = [];
+  
+  // 1. Micro BOS confirmation (1m-5m)
+  if(direction === 'LONG'){
+    confirmationConditions.push('1m-5m close-based CHoCH → BOS UP');
+  } else {
+    confirmationConditions.push('1m-5m close-based CHoCH → BOS DOWN');
+  }
+  
+  // 2. Displacement requirement
+  confirmationConditions.push(`Displacement >= ${(atrNow * 0.7).toFixed(2)} (0.7x ATR)`);
+  
+  // 3. Imbalance creation
+  confirmationConditions.push('Imbalance/FVG created on LTF');
+  
+  // 4. Price must reach POI zone
+  if(!atPOI){
+    confirmationConditions.push(`Price reaches ${poiType} (${entryPOI.toFixed(2)})`);
+  }
+  
+  // Guardrails
+  const guardrails = [];
+  
+  // 1. Pre-news suspension
+  const newsWindow = checkEventTradingWindow(STATE.symbol);
+  if(newsWindow.disable){
+    guardrails.push(`⛔ PRE-NEWS: ${newsWindow.reason} - ORDER SUSPENDED`);
+  }
+  
+  // 2. Over-mitigated zone check
+  let retestCount = 0;
+  try {
+    // Count how many times price has tested this POI level recently
+    const tolerance = atrNow * 0.2;
+    for(let i = Math.max(0, d.length - 50); i < d.length - 1; i++){
+      const bar = d[i];
+      if(Math.abs(bar.c - entryPOI) <= tolerance ||
+         (bar.h >= entryPOI - tolerance && bar.l <= entryPOI + tolerance)){
+        retestCount++;
+      }
+    }
+    
+    if(retestCount >= 3){
+      guardrails.push(`⚠️ OVER-MITIGATED: POI tested ${retestCount} times - reduce size or skip`);
+      positionMultiplier *= 0.5;
+    }
+  } catch(e){}
+  
+  // 3. ADR/ATR feasibility check
+  try {
+    const dailyBars = d.filter(bar => {
+      const age = last.t - bar.t;
+      return age <= 86400000; // Last 24 hours
+    });
+    
+    let adr = 0;
+    for(let i = 1; i < dailyBars.length; i++){
+      adr += Math.abs(dailyBars[i].h - dailyBars[i].l);
+    }
+    adr = dailyBars.length > 1 ? adr / (dailyBars.length - 1) : atrNow * 20;
+    
+    const remainingADR = adr - Math.abs(px - (direction === 'LONG' ? structure.lastLow : structure.lastHigh));
+    const tp1Move = Math.abs(tp1 - entryPOI);
+    const tp2Move = Math.abs(tp2 - entryPOI);
+    
+    if(tp1Move > remainingADR * 0.8){
+      guardrails.push(`⚠️ TP1 may exceed remaining ADR (need ${tp1Move.toFixed(0)}, have ${remainingADR.toFixed(0)})`);
+    }
+    if(tp2Move > remainingADR){
+      guardrails.push(`⚠️ TP2 exceeds remaining ADR - use TP1 only`);
+    }
+  } catch(e){}
+  
+  // Determine order status
+  let orderStatus = 'PENDING';
+  if(atPOI){
+    orderStatus = 'ACTIVE (at POI - awaiting micro confirmation)';
+  }
+  if(newsWindow.disable){
+    orderStatus = 'SUSPENDED (pre-news window)';
+  }
+  if(retestCount >= 4){
+    orderStatus = 'CANCELLED (over-mitigated)';
+  }
+  
+  return {
+    direction,
+    entry: entryPOI,
+    poiType,
+    poiDistance,
+    atPOI,
+    stopLoss,
+    tp1,
+    tp2,
+    tp3,
+    slDistance,
+    riskReward: {
+      tp1: 2.5,
+      tp2: 3.5,
+      tp3: 5.0
+    },
+    positionSize: positionMultiplier,
+    orderStatus,
+    confirmationConditions,
+    guardrails,
+    reasoning: `${direction} setup with entry at ${poiType}, R:R 1:2.5 / 1:3.5 / 1:5.0`
+  };
+}
+
+/**
+ * Enhanced heuristic that ALWAYS returns pending order (never HOLD)
+ * Determines HTF bias, then calculates pending order at optimal POI
+ */
+function heuristicPredictWithPendingOrders(baseOverride){
+  // Get base heuristic prediction
+  const baseResult = heuristicPredict(baseOverride);
+  
+  const base = (Array.isArray(baseOverride) && baseOverride.length)
+    ? baseOverride
+    : ((STATE.analysisHistory && STATE.analysisHistory.length) ? STATE.analysisHistory : STATE.history);
+  let d = getAnalysisWindow(base);
+  if(BAR_CLOSE_ONLY && d.length>1){ d = d.slice(0, -1); }
+  
+  if(!d || d.length < 50) {
+    // Not enough data - return base result
+    return baseResult;
+  }
+  
+  // If base recommendation is already actionable (BUY/SELL), check if at POI
+  const baseRec = baseResult.recommendation;
+  if(['BUY', 'STRONG BUY', 'SELL', 'STRONG SELL'].includes(baseRec)){
+    // Already has direction - check if we should convert to pending
+    const direction = (baseRec.includes('BUY')) ? 'LONG' : 'SHORT';
+    const last = d[d.length-1];
+    const px = last.c;
+    const atrNow = Number.isFinite(last.atr) ? last.atr : (px * 0.02);
+    
+    // Check if at key level
+    const atKeyLevel = (()=>{
+      try{
+        const allFVGs = computeFVGs(d);
+        let topFVGs = selectValuableFVGs(d, allFVGs) || [];
+        for(const fvg of topFVGs){
+          const mid = (fvg.y1 + fvg.y2) / 2;
+          if(Math.abs(px - mid) <= atrNow * 0.3) return true;
+        }
+        const obs = computeOrderBlocks(d);
+        if(direction === 'LONG' && obs.bull && px >= obs.bull.y1 && px <= obs.bull.y2) return true;
+        if(direction === 'SHORT' && obs.bear && px >= obs.bear.y1 && px <= obs.bear.y2) return true;
+        return false;
+      }catch{ return false; }
+    })();
+    
+    if(atKeyLevel){
+      // At ideal entry - return base result (market order OK)
+      return baseResult;
+    } else {
+      // Not at key level - convert to pending order
+      const pendingOrder = calculatePendingOrder(d, direction, 0, baseResult.reasons);
+      
+      return {
+        recommendation: `PENDING ${direction}`,
+        probability: baseResult.probability,
+        reasons: baseResult.reasons,
+        drivers: baseResult.drivers,
+        source: 'HEURISTIC-PENDING',
+        pendingOrder: pendingOrder
+      };
+    }
+  }
+  
+  // Base said HOLD - determine HTF bias and create pending order
+  const structure = computeStructure(d);
+  const last = d[d.length-1];
+  
+  // Determine HTF bias using multiple factors
+  let htfScore = 0;
+  
+  // Structure (most important)
+  if(structure.bos > 0) htfScore += 3;
+  else if(structure.bos < 0) htfScore -= 3;
+  
+  // Moving averages
+  if(last.c && last.sma50 && last.sma200){
+    if(last.c > last.sma50 && last.sma50 > last.sma200) htfScore += 2;
+    else if(last.c < last.sma50 && last.sma50 < last.sma200) htfScore -= 2;
+  }
+  
+  // Supertrend
+  if(last.st_dir) htfScore += last.st_dir * 1;
+  
+  // Close-only analysis (if available)
+  if(STATE.closeOnlyData && STATE.closeOnlyData.valid){
+    const co = STATE.closeOnlyData;
+    if(co.structure.trend === 'up') htfScore += 2;
+    else if(co.structure.trend === 'down') htfScore -= 2;
+    
+    if(co.bosDirection === 1) htfScore += 2;
+    else if(co.bosDirection === -1) htfScore -= 2;
+  }
+  
+  // Determine direction
+  const direction = htfScore >= 0 ? 'LONG' : 'SHORT';
+  
+  // Calculate pending order
+  const pendingOrder = calculatePendingOrder(d, direction, htfScore, baseResult.reasons);
+  
+  // Update reasons
+  const reasons = [...baseResult.reasons];
+  reasons.push(`📊 HTF Bias: ${direction} (score: ${htfScore.toFixed(1)})`);
+  reasons.push(`🎯 Pending order at ${pendingOrder.poiType}`);
+  reasons.push(`📍 Entry: ${pendingOrder.entry.toFixed(2)} | SL: ${pendingOrder.stopLoss.toFixed(2)}`);
+  reasons.push(`🎯 Targets: TP1=${pendingOrder.tp1.toFixed(2)} (2.5R) | TP2=${pendingOrder.tp2.toFixed(2)} (3.5R)`);
+  reasons.push(`📏 Status: ${pendingOrder.orderStatus}`);
+  
+  return {
+    recommendation: `PENDING ${direction}`,
+    probability: Math.max(65, Math.min(85, 70 + Math.abs(htfScore) * 2)),
+    reasons,
+    drivers: baseResult.drivers,
+    source: 'HEURISTIC-PENDING',
+    pendingOrder: pendingOrder
+  };
+}
+
+return {recommendation: rec, probability: prob, reasons, drivers, source:'HEURISTIC'};
+}
+
+/**
  * UNIFIED CONSENSUS ENGINE - Ensures all components agree
  * Prevents conflicting signals across Edge, Horizon, ICT, News, AI
  */
@@ -17745,9 +18127,19 @@ async function runAnalysis(){
   // ========== SELF-CONTAINED AI ENGINE (NO EXTERNAL API NEEDED) ==========
   // Start with heuristic baseline (indicators + structure)
   // ICT analysis is shown separately - does NOT influence this recommendation
-  let out = heuristicPredict(); // Our built-in AI brain
+  let out = heuristicPredictWithPendingOrders(); // Enhanced with pending order system
   out.source = out.source || 'SMART-ENGINE';
   console.log('[HEURISTIC] Recommendation:', out.recommendation, out.probability + '%');
+  if(out.pendingOrder){
+    console.log('[PENDING ORDER]', out.pendingOrder.direction, 'at', out.pendingOrder.entry.toFixed(2));
+    console.log('  POI:', out.pendingOrder.poiType, `(${(out.pendingOrder.poiDistance/1).toFixed(2)} from current)`);
+    console.log('  SL:', out.pendingOrder.stopLoss.toFixed(2), '| TP1:', out.pendingOrder.tp1.toFixed(2), '| TP2:', out.pendingOrder.tp2.toFixed(2));
+    console.log('  Status:', out.pendingOrder.orderStatus);
+    console.log('  Size:', `${(out.pendingOrder.positionSize * 100).toFixed(0)}% of base`);
+    if(out.pendingOrder.guardrails.length > 0){
+      console.log('  Guardrails:', out.pendingOrder.guardrails.join(' | '));
+    }
+  }
   console.log('[ICT] Separate analysis available in STATE._lastICTAnalysis - shown independently to user');
   
   // GLOBAL RATE LIMITER: Track AI calls per hour to prevent quota exhaustion
