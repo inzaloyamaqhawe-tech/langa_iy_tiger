@@ -19740,6 +19740,9 @@ async function runAnalysis(){
           return;
         }
         
+        // Define currentPrice for use throughout ICT display section
+        const currentPrice = last.c;
+        
         const ictLines = [];
         ictLines.push(`<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━`);
         
@@ -19761,8 +19764,9 @@ async function runAnalysis(){
         
         // GO/NO-GO decision with visual indicator
         const goSymbol = ict.goTrade ? '✅ GO TRADE' : '❌ NO TRADE';
-        const scoreColor = ict.score >= 70 ? 'green' : (ict.score >= 60 ? 'orange' : 'red');
-        ictLines.push(`<strong style="color:${scoreColor};">${goSymbol} | Score: ${ict.score.toFixed(0)}% / 100%</strong>`);
+        const ictScore = Number.isFinite(ict.score) ? ict.score : 0;
+        const scoreColor = ictScore >= 70 ? 'green' : (ictScore >= 60 ? 'orange' : 'red');
+        ictLines.push(`<strong style="color:${scoreColor};">${goSymbol} | Score: ${ictScore.toFixed(0)}% / 100%</strong>`);
         
         // Direction and setup
         if(ict.direction && ict.setupType){
@@ -19792,9 +19796,9 @@ async function runAnalysis(){
           const tp = ict.tradePlan;
           if(tp.entry) ictLines.push(`  📍 Entry: ${tp.entry}`);
           if(tp.stopLoss) ictLines.push(`  🛑 Stop Loss: ${tp.stopLoss} (1R)`);
-          if(tp.takeProfit1) ictLines.push(`  🎯 TP1: ${tp.takeProfit1} (1.5R)`);
-          if(tp.takeProfit2) ictLines.push(`  🎯 TP2: ${tp.takeProfit2} (2R)`);
-          if(tp.takeProfit3) ictLines.push(`  🎯 TP3: ${tp.takeProfit3} (2.5R)`);
+          if(tp.takeProfit1) ictLines.push(`  🎯 TP1: ${tp.takeProfit1} (1R)`);
+          if(tp.takeProfit2) ictLines.push(`  🎯 TP2: ${tp.takeProfit2} (1.5R)`);
+          if(tp.takeProfit3) ictLines.push(`  🎯 TP3: ${tp.takeProfit3} (2R)`);
           if(tp.sizeAdjustment !== undefined){
             const sizeText = tp.sizeAdjustment === 1 ? '100% (Normal)' : 
                            tp.sizeAdjustment === 0.5 ? '50% (Medium News Risk)' :
