@@ -7571,6 +7571,12 @@ function runICTAnalysis(d, fundamentals = {}){
     // Add pattern notes to reasons
     reasons.push(...patternNotes);
     
+    // ========== DEFINE MINIMUM REQUIREMENTS ==========
+    // Check if core requirements are met for summary message
+    const hasDirection = htfBias !== 0 || (structure && structure.bias !== 0);
+    const hasZone = (bestFVG !== null) || (checks.ob_proximity?.pass) || (checks.liquidity?.pass);
+    const meetsMinimum = hasDirection && hasZone && newsAllows;
+    
     return {
       goTrade,
       confirmation,
