@@ -77,7 +77,7 @@
   <div class="max-w-4xl mx-auto space-y-4">
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <img src="inzalo_ymq.jpg" alt="Inzalo Yamaqhawe icon" style="width:28px;height:28px;max-width:28px;max-height:28px;" class="rounded-full object-cover" />
+        <img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5OjcBCgoKDQwNGg8PGjclHyU3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3N//AABEIAJQAlAMBIgACEQEDEQH/xAAcAAACAwEBAQEAAAAAAAAAAAAFBgAEBwMCAQj/xAA5EAABAwMCBAQEAwgDAQEBAAABAgMEAAUREiEGMUFREyJhcQcUMoEjkaEVFiRCYrHB8FJy0QPx4f/EABkBAAMBAQEAAAAAAAAAAAAAAAIDBQQBAP/EACkRAAICAgICAQMDBQAAAAAAAAECAAMRIRIxBEEiEzJRYXGhI5GxwfD/2gAMAwEAAhEDEQA/AFi23shhtBO3mGT96YhKdiu+ITkD+Xn/+0tyH/l2lEkjtRvh2eLqwGJLIU6nY74Kx3HrWKhzN/lVgEYjTY+IPGT4Ujzk7II+lQ9uaaNodZ8xYWdBOdKuaT/5S/D4VZbJcLxZQTkoUgFST6EUXasZCCUzFn+oowaZaxUZmWtQTicrnHjSWy2/gpOyhiqfD9nlaJDPjkR0LKWlZ+oUWcajwkBUhXjLHcc68Q740H0t/hpSThKRzqK1gLHMqKjBNRK45s9xgPJf/AHd/abJICVpeUrHumhNntV5kJRLasNst4CiR4qDqwfTNaxduIo8KC6++UobbGSrIrGLjfOIeMpim7S283ECiAGyUJxnGVK/wK1K3MYTQ/JihyU5bv8RsuN1tVqjpiTLjoeVsQg8z19qDxOM7c7czFeXnKglC8ZTmrP7qxWOHFQbqGPFKDqfSN0K75PPpQfgyxwkGUErSqelag04vBykHYhNIRKODMST/AN3NbPdyAAGI6O8OWW6gOuxWHFKGy0j/ACKpK4As0L+LYelw9JyXGnCdNIsti+WKcozpb8QElTTRKmSc5xWncI8SyX4obuEb+JSjUSg5Q6nuD/iiKWVAEPlYosLCcLuVhfLa3JiWuLe/mZOvC1c8ADr71wtkJoTZE6a2gyfFKUDH0gdv1o+7H4WnOpnogRlSmV5Di0F0qzkbZ70rW2c9qU0cpQ2N8cq
         IY TIGER GROWTH
       </h1>
       <div class="flex items-center gap-2">
@@ -7635,7 +7635,8 @@ function runICTAnalysis(d, fundamentals = {}){
         takeProfit1: formatPrice(tp1, 2),
         takeProfit2: formatPrice(tp2, 2),
         takeProfit3: formatPrice(tp3, 2),
-        riskPercent: formatPercent((slDistance / entry * 100), 2),
+        riskAmount: '1R', // SL is always 1R (base risk unit)
+        riskPercent: formatPercent((slDistance / entry * 100), 2), // Distance as % of price
         sizeAdjustment: sizeMultiplier, // Use calculated size multiplier
         sizeReason: finalScore >= 75 ? 'Full' : finalScore >= 60 ? '75%' : '50%'
       } : null,
@@ -8036,11 +8037,11 @@ function computeTradePlan(d, side){
   const view = STATE.interval;
   const sizing = (()=>{
     switch(view){
-      case '1m':  return { sl:1.0, p:1.0, r:1.5 };
-      case '5m':  return { sl:1.0, p:1.2, r:1.8 };
-      case '15m': return { sl:1.0, p:1.5, r:2.0 };
+      case '1m':  return { sl:1.0, p:1.08, r:1.19 };
+      case '5m':  return { sl:1.0, p:1.12, r:1.4 };
+      case '15m': return { sl:1.0, p:1.15, r:1.3 };
       case '30m': return { sl:1.0, p:1.8, r:2.2 };
-      case '1h':  return { sl:1.0, p:2.0, r:3.0 };
+      case '1h':  return { sl:1.0, p:1.3, r:1.65 };
       case '4h':  return { sl:1.0, p:2.5, r:4.0 };
       case '1d':  return { sl:1.0, p:3.0, r:6.0 };
       case '1w':  return { sl:1.0, p:4.0, r:8.0 };
@@ -18196,6 +18197,16 @@ async function runAnalysis(){
   STATE._lastICTAnalysis = ictAnalysis; // Store for UI display
   console.log('[ICT] 12-Point Analysis on', STATE.interval, 'interval | Data:', base.length, 'bars | Score:', ictAnalysis.score + '%', '| GO TRADE:', ictAnalysis.goTrade ? 'YES ✅' : 'NO ❌', '| Direction:', ictAnalysis.direction || 'NEUTRAL');
   
+  // FORCE UI UPDATE: Trigger display update immediately after ICT completes
+  setTimeout(() => {
+    try {
+      updateDisplay(STATE.lastAnalysisOut || out);
+      console.log('[ICT] Forced display update triggered');
+    } catch(e) {
+      console.error('[ICT] Display update error:', e);
+    }
+  }, 100); // Small delay to ensure state is ready
+  
   
   // ========== BUILD SNAPSHOT FOR AI (AFTER ALL DATA LOADED) ==========
   // CRITICAL: Build snapshot AFTER indicators attached, news loaded, and fundamentals complete
@@ -19771,13 +19782,26 @@ async function runAnalysis(){
     // ========== ICT/SMC 12-POINT COMPREHENSIVE ANALYSIS ==========
     try{
       const ict = STATE._lastICTAnalysis;
-      if(ict){
+      if(!ict){
+        console.warn('[ICT Display] No ICT analysis available yet - will show when ready');
+        // Don't return - show placeholder
+        const ictLines = [];
+        ictLines.push(`<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━`);
+        ictLines.push(`<strong style="color:orange;">⏳ LOADING...</strong>`);
+        ictLines.push(`Analysis in progress. Refresh in 2-3 seconds.`);
+        const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
+        tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
+      } else {
         // Get last candle for current price
         const last = (STATE.history && STATE.history.length > 0) ? STATE.history[STATE.history.length - 1] : null;
         if(!last || !last.c){
           console.warn('[ICT Display] No valid price data');
-          return;
-        }
+          const ictLines = [];
+          ictLines.push(`<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━`);
+          ictLines.push(`<strong style="color:red;">❌ NO PRICE DATA</strong>`);
+          const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
+          tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
+        } else {
         
         // Define currentPrice for use throughout ICT display section
         const currentPrice = last.c;
