@@ -17853,50 +17853,37 @@ function heuristicPredictWithPendingOrders(baseOverride){
     return baseResult;
   }
   
-  // If base recommendation is already actionable (BUY/SELL), check if at POI
   const baseRec = baseResult.recommendation;
-  if(['BUY', 'STRONG BUY', 'SELL', 'STRONG SELL'].includes(baseRec)){
-    // Already has direction - check if we should convert to pending
-    const direction = (baseRec.includes('BUY')) ? 'LONG' : 'SHORT';
-    const last = d[d.length-1];
-    const px = last.c;
-    const atrNow = Number.isFinite(last.atr) ? last.atr : (px * 0.02);
-    
-    // Check if at key level
-    const atKeyLevel = (()=>{
-      try{
-        const allFVGs = computeFVGs(d);
-        let topFVGs = selectValuableFVGs(d, allFVGs) || [];
-        for(const fvg of topFVGs){
-          const mid = (fvg.y1 + fvg.y2) / 2;
-          if(Math.abs(px - mid) <= atrNow * 0.3) return true;
-        }
-        const obs = computeOrderBlocks(d);
-        if(direction === 'LONG' && obs.bull && px >= obs.bull.y1 && px <= obs.bull.y2) return true;
-        if(direction === 'SHORT' && obs.bear && px >= obs.bear.y1 && px <= obs.bear.y2) return true;
-        return false;
-      }catch{ return false; }
-    })();
-    
-    if(atKeyLevel){
-      // At ideal entry - return base result (market order OK)
-      return baseResult;
-    } else {
-      // Not at key level - convert to pending order
-      const pendingOrder = calculatePendingOrder(d, direction, 0, baseResult.reasons);
-      
-      return {
-        recommendation: `PENDING ${direction}`,
-        probability: baseResult.probability,
-        reasons: baseResult.reasons,
-        drivers: baseResult.drivers,
-        source: 'HEURISTIC-PENDING',
-        pendingOrder: pendingOrder
-      };
-    }
+  
+  // STRONG signals (70%+) = EXECUTE immediately (market order)
+  // These are clear actionable signals that don't need pending orders
+  if(['BUY', 'STRONG BUY', 'SELL', 'STRONG SELL'].includes(baseRec) && baseResult.probability >= 70){
+    // Clear signal with high confidence - EXECUTE NOW
+    return baseResult;
   }
   
-  // Base said HOLD - determine HTF bias and create pending order
+  // WEAK signals (50-69%) = Convert to PENDING (await confirmation)
+  // These need confirmation: BOS, candle close, structure shift, etc.
+  if(['BUY', 'STRONG BUY', 'SELL', 'STRONG SELL'].includes(baseRec) && baseResult.probability < 70){
+    // Weak signal - needs confirmation before entry
+    const direction = (baseRec.includes('BUY')) ? 'LONG' : 'SHORT';
+    const pendingOrder = calculatePendingOrder(d, direction, 0, baseResult.reasons);
+    
+    const reasons = [...baseResult.reasons];
+    reasons.push(`⚠️ Confidence ${baseResult.probability}% < 70% - awaiting confirmation`);
+    reasons.push(`📍 Pending ${direction} at POI: ${pendingOrder.poiType}`);
+    
+    return {
+      recommendation: `PENDING ${direction}`,
+      probability: baseResult.probability,
+      reasons,
+      drivers: baseResult.drivers,
+      source: 'HEURISTIC-PENDING',
+      pendingOrder: pendingOrder
+    };
+  }
+  
+  // NO CLEAR SIGNAL - Determine HTF bias and create pending order
   const structure = computeStructure(d);
   const last = d[d.length-1];
   
@@ -17934,15 +17921,15 @@ function heuristicPredictWithPendingOrders(baseOverride){
   
   // Update reasons
   const reasons = [...baseResult.reasons];
-  reasons.push(`?? HTF Bias: ${direction} (score: ${htfScore.toFixed(1)})`);
-  reasons.push(`?? Pending order at ${pendingOrder.poiType}`);
-  reasons.push(`?? Entry: ${pendingOrder.entry.toFixed(2)} | SL: ${pendingOrder.stopLoss.toFixed(2)}`);
-  reasons.push(`?? Targets: TP1=${pendingOrder.tp1.toFixed(2)} (2.5R) | TP2=${pendingOrder.tp2.toFixed(2)} (3.5R)`);
-  reasons.push(`?? Status: ${pendingOrder.orderStatus}`);
+  reasons.push(`📊 HTF Bias: ${direction} (score: ${htfScore.toFixed(1)})`);
+  reasons.push(`📍 Pending order at ${pendingOrder.poiType}`);
+  reasons.push(`🎯 Entry: ${pendingOrder.entry.toFixed(2)} | SL: ${pendingOrder.stopLoss.toFixed(2)}`);
+  reasons.push(`🎯 Targets: TP1=${pendingOrder.tp1.toFixed(2)} (2.5R) | TP2=${pendingOrder.tp2.toFixed(2)} (3.5R)`);
+  reasons.push(`📋 Status: ${pendingOrder.orderStatus}`);
   
   return {
     recommendation: `PENDING ${direction}`,
-    probability: Math.max(65, Math.min(85, 70 + Math.abs(htfScore) * 2)),
+    probability: Math.max(55, Math.min(68, 60 + Math.abs(htfScore) * 2)),
     reasons,
     drivers: baseResult.drivers,
     source: 'HEURISTIC-PENDING',
