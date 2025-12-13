@@ -16991,6 +16991,7 @@ async function runAnalysis(){
   // CRITICAL: Build snapshot AFTER indicators attached, news loaded, and fundamentals complete
   const snapshot = buildSnapshot();
   console.log('[SNAPSHOT] Built for AI | Price:', snapshot.current_price, '| RSI:', snapshot.rsi, '| News:', fundamentals.headlines?.length || 0);
+  
   // ========== SELF-CONTAINED AI ENGINE (NO EXTERNAL API NEEDED) ==========
   // Start with heuristic baseline (indicators + structure)
   // ICT analysis is shown separately - does NOT influence this recommendation
