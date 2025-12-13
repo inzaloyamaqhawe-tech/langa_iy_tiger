@@ -7613,7 +7613,17 @@ function runICTAnalysis(d, fundamentals = {}){
     };
     
   } catch(e){
-    return {goTrade: false, reason: `Analysis error: ${e.message}`, score: 0};
+    console.error('[ICT] CRITICAL ERROR in runICTAnalysis:', e.message, e.stack);
+    return {
+      goTrade: false, 
+      reason: `Analysis error: ${e.message}`, 
+      score: 0,
+      direction: 'LONG', // Default direction even on error
+      confidence: 50,
+      checks: {},
+      reasons: [`Error: ${e.message}`],
+      tradePlan: null
+    };
   }
 }
 

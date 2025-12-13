@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: langa-iy-tiger
+    env: static
+    buildCommand: echo "No build needed - static HTML"
+    staticPublishPath: .
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /tigeriy.html
