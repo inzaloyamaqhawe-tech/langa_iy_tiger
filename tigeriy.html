@@ -18892,6 +18892,36 @@ async function runAnalysis(){
   setText(recEl, `Recommendation: ${out.recommendation}`);
   setText(probEl, `Probability: ${formatScore(out.probability || 0)}%`);
   
+  // Display pending order details if present (like your examples)
+  if(out.pendingOrder && out.recommendation && out.recommendation.includes('PENDING')){
+    const po = out.pendingOrder;
+    let pendingText = `\n\n━━━━ 📋 PENDING ORDER SETUP ━━━━\n`;
+    pendingText += `Direction: ${po.direction}\n`;
+    pendingText += `Entry: ${po.entry.toFixed(2)} (${po.poiType})\n`;
+    pendingText += `Stop Loss: ${po.stopLoss.toFixed(2)}\n`;
+    pendingText += `TP1: ${po.tp1.toFixed(2)} (2.5R)\n`;
+    pendingText += `TP2: ${po.tp2.toFixed(2)} (3.5R)\n`;
+    pendingText += `TP3: ${po.tp3.toFixed(2)} (5.0R)\n`;
+    pendingText += `Position Size: ${(po.positionSize * 100).toFixed(0)}% of base\n`;
+    pendingText += `Status: ${po.orderStatus}\n`;
+    
+    if(po.confirmationConditions && po.confirmationConditions.length > 0){
+      pendingText += `\nConfirmation Required:\n`;
+      po.confirmationConditions.forEach(cond => {
+        pendingText += `  ✓ ${cond}\n`;
+      });
+    }
+    
+    if(po.guardrails && po.guardrails.length > 0){
+      pendingText += `\nGuardrails:\n`;
+      po.guardrails.forEach(gr => {
+        pendingText += `  ⚠️ ${gr}\n`;
+      });
+    }
+    
+    setText(recEl, `Recommendation: ${out.recommendation}${pendingText}`);
+  }
+  
   // ROOT CAUSE DIAGNOSIS (Engineer's mindset: WHY before WHAT)
   let reasonsText = '';
   if(diagnosis && diagnosis.verdict){
