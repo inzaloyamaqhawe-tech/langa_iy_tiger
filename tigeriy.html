@@ -57,7 +57,7 @@
   <!-- Login Screen -->
   <div id="loginScreen">
     <div id="loginBox">
-      <h1>🐅 Inzalo Yamaqhawe</h1>
+      <h1>Inzalo Yamaqhawe</h1>
       <p class="subtitle">Welcome to Professional Trading System</p>
       
       <label for="username">Username</label>
@@ -7650,15 +7650,18 @@ function runICTAnalysis(d, fundamentals = {}){
     
   } catch(e){
     console.error('[ICT] CRITICAL ERROR in runICTAnalysis:', e.message, e.stack);
+    console.error('[ICT] Error occurred at:', new Error().stack);
     return {
       goTrade: false, 
       reason: `Analysis error: ${e.message}`, 
       score: 0,
-      direction: 'LONG', // Default direction even on error
-      confidence: 50,
+      direction: 'LONG',
+      confidence: 0,
       checks: {},
-      reasons: [`Error: ${e.message}`],
-      tradePlan: null
+      reasons: [`❌ Error: ${e.message}`],
+      tradePlan: null,
+      confirmation: {confirmed: false, reason: 'Error occurred'},
+      discountPremium: {zone: 'equilibrium', percent: 50}
     };
   }
 }
@@ -19800,7 +19803,14 @@ async function runAnalysis(){
         
         // GO/NO-GO decision with visual indicator
         const goSymbol = ict.goTrade ? '✅ GO TRADE' : '❌ NO TRADE';
-        const ictScore = Number.isFinite(ict.score) ? ict.score : 0;
+        
+        // DEEP DEBUG: Check if score exists and log it
+        console.log('[ICT DISPLAY] ict object:', ict);
+        console.log('[ICT DISPLAY] ict.score:', ict.score, '| Type:', typeof ict.score);
+        
+        const ictScore = (ict.score !== undefined && ict.score !== null && Number.isFinite(ict.score)) ? ict.score : 0;
+        console.log('[ICT DISPLAY] Calculated ictScore:', ictScore);
+        
         const scoreColor = ictScore >= 70 ? 'green' : (ictScore >= 60 ? 'orange' : 'red');
         ictLines.push(`<strong style="color:${scoreColor};">${goSymbol} | Score: ${ictScore.toFixed(0)}% / 100%</strong>`);
         
@@ -20834,21 +20844,10 @@ const USERS = {
 
 let currentUser = null;
 
-// Check if already logged in (session storage)
+// DISABLED: No auto-login - user must login every time
 function checkSession() {
-  const session = sessionStorage.getItem('iy_tiger_session');
-  if (session) {
-    try {
-      const userData = JSON.parse(session);
-      if (userData && userData.username && USERS[userData.username]) {
-        currentUser = userData;
-        showApp();
-        return true;
-      }
-    } catch(e) {
-      console.error('Session parse error:', e);
-    }
-  }
+  // Always return false - force login on every page load/refresh
+  sessionStorage.removeItem('iy_tiger_session'); // Clear any old session
   return false;
 }
 
@@ -20889,8 +20888,8 @@ function handleLogin() {
       loginTime: new Date().toISOString()
     };
     
-    // Save session
-    sessionStorage.setItem('iy_tiger_session', JSON.stringify(currentUser));
+    // NO SESSION SAVE - user must login again on refresh
+    // sessionStorage.setItem('iy_tiger_session', JSON.stringify(currentUser));
     
     // Show app
     showApp();
