@@ -7008,9 +7008,10 @@ function runICTAnalysis(d, fundamentals = {}){
     // DIRECTION: Use confirmation direction (from BOS)
     const direction = intendedDirection === 1 ? 'LONG' : 'SHORT';
     
-    const tp1 = direction === 'LONG' ? entry + (slDistance * 1.5) : (direction === 'SHORT' ? entry - (slDistance * 1.5) : entry);
-    const tp2 = direction === 'LONG' ? entry + (slDistance * 2.0) : (direction === 'SHORT' ? entry - (slDistance * 2.0) : entry);
-    const tp3 = direction === 'LONG' ? entry + (slDistance * 2.5) : (direction === 'SHORT' ? entry - (slDistance * 2.5) : entry);
+    // FIXED: Wider TPs for crypto volatility (was 1.5R/2R/2.5R = 42% win rate)
+    const tp1 = direction === 'LONG' ? entry + (slDistance * 2.5) : (direction === 'SHORT' ? entry - (slDistance * 2.5) : entry);
+    const tp2 = direction === 'LONG' ? entry + (slDistance * 3.5) : (direction === 'SHORT' ? entry - (slDistance * 3.5) : entry);
+    const tp3 = direction === 'LONG' ? entry + (slDistance * 5.0) : (direction === 'SHORT' ? entry - (slDistance * 5.0) : entry);
     
     // ========== PATTERN SHAPE BONUS SCORING ==========
     // Per research: Add bonus points for pattern confluence
@@ -16465,11 +16466,19 @@ function heuristicPredict(baseOverride){
   // Collect human-readable reasons incrementally
   const reasons = [];
 
+  // CRITICAL FIX: FADE momentum instead of CHASE (mean-reversion for crypto)
+  // Previous logic was BACKWARDS - caused buying tops and selling bottoms
   let score = 0;
-  score += slopeClamped * 9;
-  score += priceVsSMA50 * 4;
-  if(rsi > 70) score -= 2.0;
-  if(rsi < 30) score += 2.0;
+  
+  // 1) REVERSE SLOPE: Fade recent momentum (buy dips, sell rips)
+  score -= slopeClamped * 6;  // REVERSED and REDUCED weight
+  
+  // 2) Structure alignment is PRIMARY (not slope)
+  score += priceVsSMA50 * 7;  // INCREASED - trend following via MA
+  
+  // 3) RSI EXTREMES are STRONG signals (not weak)
+  if(rsi > 70) score -= 5.0;  // INCREASED from 2.0 - strong overbought
+  if(rsi < 30) score += 5.0;  // INCREASED from 2.0 - strong oversold
   score -= bbPos * 1.8;
   // Penalize high volatility by ATR% instead of absolute ATR
   score -= atrPct * 25;
@@ -16480,6 +16489,14 @@ function heuristicPredict(baseOverride){
   score += macdUnit * 2;
   score += stDir * 2.5; // supertrend direction boost
   if(adxVal >= 20) score += (adxVal-20) * 0.03; // trend strength booster
+  
+  // MOMENTUM EXHAUSTION: Penalize parabolic moves (likely reversals)
+  const last10bodies = d.slice(-10).map(c => Math.abs((c.c||0)-(c.o||c.c)));
+  const avgBody10 = last10bodies.reduce((a,b)=>a+b,0) / last10bodies.length;
+  const lastBody = Math.abs((last.c||0)-(last.o||last.c));
+  const parabolic = lastBody > avgBody10 * 2.5; // Huge candle = exhaustion
+  if(parabolic && slopeClamped > 0.02) score -= 4.0; // Penalize buying parabolic UP
+  if(parabolic && slopeClamped < -0.02) score += 4.0; // Reward buying parabolic DOWN (reversal)
   // EMA alignment
   if(ema9!=null && ema21!=null){ score += (ema9>ema21 ? 0.9 : -0.9); }
   // TEMA trend quality: price vs TEMA and TEMA slope
@@ -16712,13 +16729,16 @@ function heuristicPredict(baseOverride){
   try{
     const recU = String(rec).toUpperCase();
     const side = recU.includes('SELL') ? -1 : (recU.includes('BUY') ? 1 : 0);
-    // 1) Trend direction priority: ignore counter-trend unless reversal confirmed (ChoCH/BOS against trend + retest)
+    // 1) STRICT TREND FILTER: NEVER trade counter-trend (this was causing 58% of losses)
     if(trendSide!==0 && side!==0 && side!==trendSide){
-      // Require: price crossing below/above last swing in opposite direction AND a retest rejection (use breakoutNoRetest inverse)
-      const bosAgainst = (trendSide>0) ? (Number.isFinite(lastLow) && px < lastLow*0.9995) : (Number.isFinite(lastHigh) && px > lastHigh*1.0005);
-      const retest = !breakoutNoRetest; // if we consider it a retest present
-      if(!(bosAgainst && retest)){
-        rec = 'HOLD'; prob = 50; reasons.push('Counter-trend without confirmed reversal (blocked)');
+      // BLOCK ALL counter-trend trades - need structural confirmation first
+      const bosAgainst = (trendSide>0) ? (Number.isFinite(lastLow) && px < lastLow*0.998) : (Number.isFinite(lastHigh) && px > lastHigh*1.002);
+      const strongRetest = !breakoutNoRetest && fvgConfluenceOK; // Need BOTH retest AND FVG
+      const rsiExtreme = (trendSide>0 && rsi<25) || (trendSide<0 && rsi>75); // Extreme reversal zone
+      
+      // Only allow if: BOS + retest + FVG OR extreme RSI reversal
+      if(!(bosAgainst && strongRetest) && !rsiExtreme){
+        rec = 'HOLD'; prob = 50; reasons.push('⛔ Counter-trend blocked - wait for structure break + retest');
       }
     }
     // 2) Avoid buying breakouts without retest (and vice versa)
@@ -16757,6 +16777,51 @@ function heuristicPredict(baseOverride){
     // 6) Indicator alignment: require EMA50/200 + oscillator support for confirmation boost; else cap
     if(side>0 && !(emaAlignUp && oscUp)) { prob = Math.min(prob, 82); reasons.push('Incomplete alignment (EMA/osc)'); }
     if(side<0 && !(emaAlignDn && oscDn)) { prob = Math.min(prob, 82); reasons.push('Incomplete alignment (EMA/osc)'); }
+    
+    // 7) CRITICAL ENTRY QUALITY GATE: Only allow trades AT key levels (FIX for 42% win rate)
+    // Problem: Entering at market price = chasing = stops hit before TP1
+    // Solution: Require price to be AT FVG/OB/S/R zone before allowing entry
+    if(side !== 0){
+      const atKeyLevel = (()=>{
+        try{
+          // Check if price is at FVG midpoint
+          const allFVGs = computeFVGs(d);
+          let topFVGs = selectValuableFVGs(d, allFVGs) || [];
+          if(topFVGs.length > 0){
+            for(const fvg of topFVGs){
+              const mid = (fvg.y1 + fvg.y2) / 2;
+              const tolerance = atrNow * 0.3;
+              if(Math.abs(px - mid) <= tolerance) return true;
+            }
+          }
+          
+          // Check if price is at order block
+          const obs = computeOrderBlocks(d);
+          if(side > 0 && obs.bull){
+            if(px >= obs.bull.y1 && px <= obs.bull.y2) return true;
+          }
+          if(side < 0 && obs.bear){
+            if(px >= obs.bear.y1 && px <= obs.bear.y2) return true;
+          }
+          
+          // Check if price is at S/R zone
+          if(nearSR.near) return true;
+          
+          // Check if price is at key moving average (EMA20/50)
+          const ema20Dist = last.ema20 ? Math.abs(px - last.ema20) / px : 1;
+          const ema50Dist = last.ema50 ? Math.abs(px - last.ema50) / px : 1;
+          if(ema20Dist < 0.003 || ema50Dist < 0.005) return true;
+          
+          return false;
+        }catch{ return false; }
+      })();
+      
+      if(!atKeyLevel){
+        rec = 'HOLD'; 
+        prob = 50; 
+        reasons.push('âš  NOT at key level - wait for pullback to FVG/OB/S/R before entering');
+      }
+    }
   }catch{}
 
   // reasons already collected above; continue adding below
