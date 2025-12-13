@@ -853,6 +853,8 @@ let STATE = {
   interval:'1h',            // view interval (user selection)
   displayRes:'5m',          // actual chart resolution derived from view interval
   chartType:'line',
+  analysisMode:'AUTO',      // AUTO, OHLC_FULL, LINE_ONLY
+  closeOnlyData:null,       // Close-only analysis results when in LINE_ONLY mode
   history:[],               // display history (chart)
   analysisHistory:[],       // analysis history (AI/indicators summary)
   htfHistory:[],            // higher timeframe history for confirmation
@@ -6439,6 +6441,517 @@ function calculateDiscountPremium(d, structure){
   
   return {zone, percent, swingHigh, swingLow};
 }
+
+// ============================================================================
+// CLOSE-ONLY ANALYSIS FRAMEWORK
+// Accurate technical analysis when only line chart (close prices) available
+// Implements 60-point deterministic framework for structure, pivots, zones
+// ============================================================================
+
+/**
+ * Adaptive N values for pivot detection based on timeframe
+ * @param {string} interval - Timeframe (1m, 5m, 15m, 1h, 4h, 1d, etc.)
+ * @returns {number} N value for left/right pivot comparison
+ */
+function getPivotN(interval){
+  const tfMinutes = parseInterval(interval);
+  if(tfMinutes <= 5) return 2;       // 1m-5m
+  if(tfMinutes <= 60) return 3;      // 15m-1h
+  if(tfMinutes <= 240) return 4;     // 4h
+  return 5;                          // 1d+
+}
+
+/**
+ * Detect pivot highs and lows using close-only data
+ * Pivot-high: close greater than N left and N right closes
+ * Pivot-low: close less than N left and N right closes
+ * @param {Array} d - Candle data (only .c used)
+ * @param {number} N - Number of bars for left/right comparison
+ * @returns {Array} Pivot points with {i:index, t:time, c:close, type:'high'|'low'}
+ */
+function detectClosePivots(d, N=3){
+  if(!d || d.length < N*2+1) return [];
+  const pivots = [];
+  
+  for(let i=N; i<d.length-N; i++){
+    const currentClose = d[i].c;
+    if(!Number.isFinite(currentClose)) continue;
+    
+    // Check if pivot high
+    let isHigh = true;
+    for(let j=1; j<=N; j++){
+      if(d[i-j].c >= currentClose || d[i+j].c >= currentClose){
+        isHigh = false;
+        break;
+      }
+    }
+    
+    // Check if pivot low
+    let isLow = true;
+    for(let j=1; j<=N; j++){
+      if(d[i-j].c <= currentClose || d[i+j].c <= currentClose){
+        isLow = false;
+        break;
+      }
+    }
+    
+    if(isHigh){
+      pivots.push({i, t:d[i].t, c:currentClose, type:'high'});
+    } else if(isLow){
+      pivots.push({i, t:d[i].t, c:currentClose, type:'low'});
+    }
+  }
+  
+  return pivots;
+}
+
+/**
+ * Calculate ATR proxy from close-to-close changes
+ * Replaces True Range when OHLC unavailable
+ * @param {Array} d - Candle data
+ * @param {number} period - ATR period (default 14)
+ * @returns {number} ATR_close value
+ */
+function calculateATRClose(d, period=14){
+  if(!d || d.length < period+1) return 0;
+  
+  let sum = 0;
+  for(let i=d.length-period; i<d.length; i++){
+    const change = Math.abs(d[i].c - d[i-1].c);
+    sum += change;
+  }
+  
+  return sum / period;
+}
+
+/**
+ * Label structure as HH/HL/LH/LL based on close-based pivots
+ * HH: Higher High (pivot high > last pivot high)
+ * HL: Higher Low (pivot low > last pivot low)
+ * LH: Lower High (pivot high < last pivot high)
+ * LL: Lower Low (pivot low < last pivot low)
+ * @param {Array} pivots - Output from detectClosePivots
+ * @returns {Object} {labels: Array, trend: 'up'|'down'|'transition'}
+ */
+function labelStructure(pivots){
+  if(!pivots || pivots.length < 2) return {labels:[], trend:'transition'};
+  
+  const labels = [];
+  let lastHigh = null, lastLow = null;
+  let hhCount = 0, hlCount = 0, lhCount = 0, llCount = 0;
+  
+  for(const pivot of pivots){
+    if(pivot.type === 'high'){
+      if(lastHigh){
+        const label = pivot.c > lastHigh.c ? 'HH' : 'LH';
+        labels.push({...pivot, label});
+        if(label === 'HH') hhCount++;
+        else lhCount++;
+      }
+      lastHigh = pivot;
+    } else {
+      if(lastLow){
+        const label = pivot.c > lastLow.c ? 'HL' : 'LL';
+        labels.push({...pivot, label});
+        if(label === 'HL') hlCount++;
+        else llCount++;
+      }
+      lastLow = pivot;
+    }
+  }
+  
+  // Determine trend state
+  let trend = 'transition';
+  if((hhCount + hlCount) > (lhCount + llCount) * 1.5) trend = 'up';
+  else if((lhCount + llCount) > (hhCount + hlCount) * 1.5) trend = 'down';
+  
+  return {labels, trend, lastHigh, lastLow};
+}
+
+/**
+ * Detect BOS (Break of Structure) using close levels
+ * BOS up: close above previous pivot high + tolerance
+ * BOS down: close below previous pivot low + tolerance
+ * @param {Array} d - Candle data
+ * @param {Object} structure - From labelStructure
+ * @param {number} atrClose - ATR_close value
+ * @param {number} tolerance - Multiple of ATR (default 0.15)
+ * @returns {number} 1=BOS up, -1=BOS down, 0=none
+ */
+function detectCloseBOS(d, structure, atrClose, tolerance=0.15){
+  if(!d || !structure || !structure.lastHigh || !structure.lastLow) return 0;
+  
+  const last = d[d.length-1];
+  const buffer = atrClose * tolerance;
+  
+  // Check BOS up
+  if(last.c > structure.lastHigh.c + buffer){
+    return 1;
+  }
+  
+  // Check BOS down
+  if(last.c < structure.lastLow.c - buffer){
+    return -1;
+  }
+  
+  return 0;
+}
+
+/**
+ * Detect CHoCH (Change of Character) - first break opposite to prevailing trend
+ * @param {Array} d - Candle data
+ * @param {Object} structure - From labelStructure
+ * @param {number} bosDirection - From detectCloseBOS
+ * @returns {boolean} True if CHoCH detected
+ */
+function detectCloseCHoCH(structure, bosDirection){
+  if(!structure || bosDirection === 0) return false;
+  
+  // CHoCH: BOS opposite to current trend
+  if(structure.trend === 'up' && bosDirection === -1) return true;
+  if(structure.trend === 'down' && bosDirection === 1) return true;
+  
+  return false;
+}
+
+/**
+ * Detect displacement segments (consecutive closes in one direction)
+ * Used as imbalance/"FVG" proxy when OHLC unavailable
+ * @param {Array} d - Candle data
+ * @param {number} atrClose - ATR_close value
+ * @param {number} threshold - Minimum cumulative move (default 0.7x ATR)
+ * @returns {Array} Displacement zones with {start, end, direction, magnitude, midpoint}
+ */
+function detectDisplacementSegments(d, atrClose, threshold=0.7){
+  if(!d || d.length < 3) return [];
+  
+  const displacements = [];
+  const minMove = atrClose * threshold;
+  let segmentStart = null;
+  let segmentDir = 0;
+  let cumulativeMove = 0;
+  
+  for(let i=1; i<d.length; i++){
+    const move = d[i].c - d[i-1].c;
+    const currentDir = move > 0 ? 1 : (move < 0 ? -1 : 0);
+    
+    if(currentDir === 0) continue;
+    
+    if(segmentDir === currentDir){
+      // Continue segment
+      cumulativeMove += Math.abs(move);
+    } else {
+      // Direction changed - finalize previous segment
+      if(segmentStart && Math.abs(cumulativeMove) >= minMove){
+        const midpoint = (d[segmentStart].c + d[i-1].c) / 2;
+        displacements.push({
+          start: segmentStart,
+          end: i-1,
+          startT: d[segmentStart].t,
+          endT: d[i-1].t,
+          direction: segmentDir,
+          magnitude: cumulativeMove,
+          midpoint,
+          zone: [Math.min(d[segmentStart].c, d[i-1].c), Math.max(d[segmentStart].c, d[i-1].c)]
+        });
+      }
+      
+      // Start new segment
+      segmentStart = i-1;
+      segmentDir = currentDir;
+      cumulativeMove = Math.abs(move);
+    }
+  }
+  
+  // Finalize last segment
+  if(segmentStart && Math.abs(cumulativeMove) >= minMove){
+    const lastIdx = d.length - 1;
+    const midpoint = (d[segmentStart].c + d[lastIdx].c) / 2;
+    displacements.push({
+      start: segmentStart,
+      end: lastIdx,
+      startT: d[segmentStart].t,
+      endT: d[lastIdx].t,
+      direction: segmentDir,
+      magnitude: cumulativeMove,
+      midpoint,
+      zone: [Math.min(d[segmentStart].c, d[lastIdx].c), Math.max(d[segmentStart].c, d[lastIdx].c)]
+    });
+  }
+  
+  return displacements;
+}
+
+/**
+ * Detect Order Block proxy from close-only data
+ * Bullish OB: last cluster of lower closes before upside BOS
+ * Bearish OB: last cluster of higher closes before downside BOS
+ * @param {Array} d - Candle data
+ * @param {number} bosDirection - 1=up, -1=down, 0=none
+ * @param {number} atrClose - ATR_close value
+ * @param {number} lookback - Bars to look back for cluster (default 10)
+ * @returns {Object|null} OB zone {low, high, midpoint, type}
+ */
+function detectCloseOBProxy(d, bosDirection, atrClose, lookback=10){
+  if(!d || d.length < lookback || bosDirection === 0) return null;
+  
+  const startIdx = Math.max(0, d.length - lookback - 1);
+  const endIdx = d.length - 1;
+  
+  if(bosDirection === 1){
+    // Bullish OB: find last cluster of declining closes
+    let clusterMin = Infinity, clusterMax = -Infinity;
+    let foundCluster = false;
+    
+    for(let i=endIdx; i>=startIdx; i--){
+      if(i > 0 && d[i].c < d[i-1].c){
+        clusterMin = Math.min(clusterMin, d[i].c);
+        clusterMax = Math.max(clusterMax, d[i].c);
+        foundCluster = true;
+      } else if(foundCluster) {
+        break; // Stop at first rising close
+      }
+    }
+    
+    if(foundCluster){
+      const buffer = atrClose * 0.1;
+      return {
+        low: clusterMin - buffer,
+        high: clusterMax + buffer,
+        midpoint: (clusterMin + clusterMax) / 2,
+        type: 'bullish'
+      };
+    }
+  } else if(bosDirection === -1){
+    // Bearish OB: find last cluster of rising closes
+    let clusterMin = Infinity, clusterMax = -Infinity;
+    let foundCluster = false;
+    
+    for(let i=endIdx; i>=startIdx; i--){
+      if(i > 0 && d[i].c > d[i-1].c){
+        clusterMin = Math.min(clusterMin, d[i].c);
+        clusterMax = Math.max(clusterMax, d[i].c);
+        foundCluster = true;
+      } else if(foundCluster) {
+        break; // Stop at first falling close
+      }
+    }
+    
+    if(foundCluster){
+      const buffer = atrClose * 0.1;
+      return {
+        low: clusterMin - buffer,
+        high: clusterMax + buffer,
+        midpoint: (clusterMin + clusterMax) / 2,
+        type: 'bearish'
+      };
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Detect equal highs/lows as liquidity pools (close-only proxy)
+ * Series of closes within tight band (≤ 0.1-0.2x ATR_close)
+ * @param {Array} pivots - From detectClosePivots
+ * @param {number} atrClose - ATR_close value
+ * @param {number} tolerance - Band width multiplier (default 0.15)
+ * @returns {Array} Liquidity zones {price, type:'high'|'low', count}
+ */
+function detectCloseLiquidityPools(pivots, atrClose, tolerance=0.15){
+  if(!pivots || pivots.length < 2) return [];
+  
+  const pools = [];
+  const bandwidth = atrClose * tolerance;
+  
+  // Group highs
+  const highs = pivots.filter(p => p.type === 'high');
+  for(let i=0; i<highs.length; i++){
+    let count = 1;
+    const basePrice = highs[i].c;
+    
+    for(let j=i+1; j<highs.length; j++){
+      if(Math.abs(highs[j].c - basePrice) <= bandwidth){
+        count++;
+      }
+    }
+    
+    if(count >= 2){
+      pools.push({price: basePrice, type: 'high', count, zone: [basePrice - bandwidth, basePrice + bandwidth]});
+    }
+  }
+  
+  // Group lows
+  const lows = pivots.filter(p => p.type === 'low');
+  for(let i=0; i<lows.length; i++){
+    let count = 1;
+    const basePrice = lows[i].c;
+    
+    for(let j=i+1; j<lows.length; j++){
+      if(Math.abs(lows[j].c - basePrice) <= bandwidth){
+        count++;
+      }
+    }
+    
+    if(count >= 2){
+      pools.push({price: basePrice, type: 'low', count, zone: [basePrice - bandwidth, basePrice + bandwidth]});
+    }
+  }
+  
+  return pools;
+}
+
+/**
+ * Calculate discount/premium zones using close-only data
+ * Discount (33-50%): Long zone
+ * Premium (50-67%): Short zone
+ * @param {Array} d - Candle data
+ * @param {Object} structure - From labelStructure
+ * @returns {Object} {zone:'discount'|'premium'|'equilibrium', percent, range}
+ */
+function calculateCloseZones(d, structure){
+  if(!d || !structure || !structure.lastHigh || !structure.lastLow){
+    return {zone: 'equilibrium', percent: 50, range: 0};
+  }
+  
+  const last = d[d.length-1];
+  const high = structure.lastHigh.c;
+  const low = structure.lastLow.c;
+  const range = high - low;
+  
+  if(range <= 0) return {zone: 'equilibrium', percent: 50, range: 0};
+  
+  const percent = ((last.c - low) / range) * 100;
+  
+  let zone = 'equilibrium';
+  if(percent <= 38.2) zone = 'discount';      // Deep discount
+  else if(percent >= 61.8) zone = 'premium';  // Deep premium
+  else if(percent < 50) zone = 'discount';    // Discount
+  else if(percent > 50) zone = 'premium';     // Premium
+  
+  return {zone, percent, range, high, low};
+}
+
+/**
+ * Check if price is at a POI (Point of Interest) for entry
+ * POIs: Displacement midpoint, OB proxy edges, liquidity zones
+ * @param {number} price - Current price
+ * @param {Array} displacements - From detectDisplacementSegments
+ * @param {Object} obProxy - From detectCloseOBProxy
+ * @param {Array} liquidityPools - From detectCloseLiquidityPools
+ * @param {number} atrClose - ATR_close value
+ * @param {number} tolerance - Distance tolerance (default 0.3x ATR)
+ * @returns {Object} {atPOI: boolean, poiType: string, distance: number}
+ */
+function checkPriceAtPOI(price, displacements, obProxy, liquidityPools, atrClose, tolerance=0.3){
+  const maxDistance = atrClose * tolerance;
+  
+  // Check displacement midpoints (FVG50 proxy)
+  if(displacements && displacements.length > 0){
+    for(const disp of displacements){
+      const distance = Math.abs(price - disp.midpoint);
+      if(distance <= maxDistance){
+        return {atPOI: true, poiType: 'displacement_midpoint', distance, poi: disp.midpoint};
+      }
+    }
+  }
+  
+  // Check OB proxy edges
+  if(obProxy){
+    const distLow = Math.abs(price - obProxy.low);
+    const distHigh = Math.abs(price - obProxy.high);
+    const distMid = Math.abs(price - obProxy.midpoint);
+    
+    if(Math.min(distLow, distHigh, distMid) <= maxDistance){
+      return {atPOI: true, poiType: 'ob_proxy', distance: Math.min(distLow, distHigh, distMid), poi: obProxy.midpoint};
+    }
+  }
+  
+  // Check liquidity pools
+  if(liquidityPools && liquidityPools.length > 0){
+    for(const pool of liquidityPools){
+      const distance = Math.abs(price - pool.price);
+      if(distance <= maxDistance){
+        return {atPOI: true, poiType: 'liquidity_pool', distance, poi: pool.price};
+      }
+    }
+  }
+  
+  return {atPOI: false, poiType: 'none', distance: Infinity, poi: null};
+}
+
+/**
+ * Run comprehensive close-only analysis
+ * Orchestrates all close-based detection functions
+ * @param {Array} d - Candle data
+ * @param {string} interval - Timeframe
+ * @returns {Object} Complete close-only analysis results
+ */
+function runCloseOnlyAnalysis(d, interval='1h'){
+  if(!d || d.length < 50){
+    return {
+      valid: false,
+      reason: 'Insufficient data for close-only analysis',
+      mode: 'LINE_ONLY'
+    };
+  }
+  
+  try {
+    const N = getPivotN(interval);
+    const atrClose = calculateATRClose(d);
+    const pivots = detectClosePivots(d, N);
+    const structure = labelStructure(pivots);
+    const bosDirection = detectCloseBOS(d, structure, atrClose);
+    const chochDetected = detectCloseCHoCH(structure, bosDirection);
+    const displacements = detectDisplacementSegments(d, atrClose);
+    const obProxy = detectCloseOBProxy(d, bosDirection, atrClose);
+    const liquidityPools = detectCloseLiquidityPools(pivots, atrClose);
+    const zones = calculateCloseZones(d, structure);
+    
+    const last = d[d.length-1];
+    const poiCheck = checkPriceAtPOI(last.c, displacements, obProxy, liquidityPools, atrClose);
+    
+    // Confirmation flag gating (Rule 50)
+    const hasDisplacement = displacements.length > 0 && 
+                           displacements[displacements.length-1].magnitude >= atrClose * 0.7;
+    const hasRetest = poiCheck.atPOI;
+    const confirmationFlag = (bosDirection !== 0) && hasDisplacement && hasRetest;
+    
+    return {
+      valid: true,
+      mode: 'LINE_ONLY',
+      interval,
+      atrClose,
+      N,
+      pivots,
+      structure,
+      bosDirection,        // 1=up, -1=down, 0=none
+      chochDetected,
+      displacements,
+      obProxy,
+      liquidityPools,
+      zones,
+      poiCheck,
+      confirmationFlag,
+      last: {
+        price: last.c,
+        time: last.t
+      }
+    };
+  } catch(e){
+    console.error('Error in close-only analysis:', e);
+    return {
+      valid: false,
+      reason: 'Error during close-only analysis: ' + e.message,
+      mode: 'LINE_ONLY'
+    };
+  }
+}
+
+// ============================================================================
+// END CLOSE-ONLY ANALYSIS FRAMEWORK
+// ============================================================================
 
 // Comprehensive 12-point ICT/SMC Analysis System
 function runICTAnalysis(d, fundamentals = {}){
@@ -16311,6 +16824,40 @@ function buildSnapshot(){
   // Helper to provide fallback numbers instead of null (AI needs actual values)
   const safe = (val, fallback) => (Number.isFinite(val) && val !== null) ? val : fallback;
   
+  // Close-only analysis data (when LINE_ONLY mode active)
+  let closeOnlySnapshot = null;
+  if(STATE.closeOnlyData && STATE.closeOnlyData.valid){
+    const co = STATE.closeOnlyData;
+    closeOnlySnapshot = {
+      mode: 'LINE_ONLY',
+      ohlc_quality: 'LOW - using close-based analysis',
+      atr_close: co.atrClose,
+      pivot_count: co.pivots.length,
+      structure_trend: co.structure.trend, // 'up'|'down'|'transition'
+      bos_direction: co.bosDirection === 1 ? 'UP' : (co.bosDirection === -1 ? 'DOWN' : 'NONE'),
+      choch_detected: co.chochDetected,
+      displacement_count: co.displacements.length,
+      recent_displacement: co.displacements.length > 0 ? {
+        direction: co.displacements[co.displacements.length-1].direction === 1 ? 'UP' : 'DOWN',
+        magnitude: co.displacements[co.displacements.length-1].magnitude,
+        threshold: co.atrClose * 0.7
+      } : null,
+      ob_proxy: co.obProxy ? {
+        type: co.obProxy.type,
+        zone: [co.obProxy.low, co.obProxy.high],
+        midpoint: co.obProxy.midpoint
+      } : null,
+      liquidity_pools: co.liquidityPools.length,
+      zone: co.zones.zone, // 'discount'|'premium'|'equilibrium'
+      zone_percent: co.zones.percent,
+      at_poi: co.poiCheck.atPOI,
+      poi_type: co.poiCheck.poiType,
+      poi_distance: co.poiCheck.distance,
+      confirmation_flag: co.confirmationFlag,
+      trade_allowed: co.confirmationFlag // Rule 50 gating
+    };
+  }
+  
   return {
     current_price: safe(last?.c, 0),
     rsi: safe(last?.rsi, 50),
@@ -16338,7 +16885,8 @@ function buildSnapshot(){
     order_blocks: {
       bull: orderBlocks?.bull ? { lo: orderBlocks.bull.y1, hi: orderBlocks.bull.y2 } : null,
       bear: orderBlocks?.bear ? { lo: orderBlocks.bear.y1, hi: orderBlocks.bear.y2 } : null
-    }
+    },
+    close_only: closeOnlySnapshot // Include close-only analysis when active
   };
 }
 
@@ -16469,6 +17017,89 @@ function heuristicPredict(baseOverride){
   // CRITICAL FIX: FADE momentum instead of CHASE (mean-reversion for crypto)
   // Previous logic was BACKWARDS - caused buying tops and selling bottoms
   let score = 0;
+  
+  // ========== CLOSE-ONLY STRUCTURE INTEGRATION ==========
+  // If running in LINE_ONLY mode, prioritize close-based structure signals
+  if(STATE.closeOnlyData && STATE.closeOnlyData.valid){
+    const co = STATE.closeOnlyData;
+    reasons.push(`📊 LINE-ONLY MODE (OHLC quality low - using close-based analysis)`);
+    
+    // BOS direction strongly influences score
+    if(co.bosDirection === 1){
+      score += 8.0; // Strong bullish BOS
+      reasons.push(`BOS UP âœ… (close above pivot high + ${(0.15 * co.atrClose).toFixed(2)})`);
+    } else if(co.bosDirection === -1){
+      score -= 8.0; // Strong bearish BOS
+      reasons.push(`BOS DOWN âœ… (close below pivot low - ${(0.15 * co.atrClose).toFixed(2)})`);
+    }
+    
+    // CHoCH indicates potential reversal
+    if(co.chochDetected){
+      if(co.bosDirection === 1) score += 3.0; // Reversal confirmed up
+      else if(co.bosDirection === -1) score -= 3.0; // Reversal confirmed down
+      reasons.push(`CHoCH detected (trend changing)`);
+    }
+    
+    // Trend alignment
+    if(co.structure.trend === 'up'){
+      score += 4.0;
+      reasons.push(`Structure: UPTREND (HH/HL pattern)`);
+    } else if(co.structure.trend === 'down'){
+      score -= 4.0;
+      reasons.push(`Structure: DOWNTREND (LL/LH pattern)`);
+    }
+    
+    // Discount/Premium zones
+    if(co.zones.zone === 'discount' && co.zones.percent < 38.2){
+      score += 5.0; // Deep discount = buy zone
+      reasons.push(`DEEP DISCOUNT zone (${co.zones.percent.toFixed(1)}% of range) - high RR longs`);
+    } else if(co.zones.zone === 'premium' && co.zones.percent > 61.8){
+      score -= 5.0; // Deep premium = sell zone
+      reasons.push(`DEEP PREMIUM zone (${co.zones.percent.toFixed(1)}% of range) - high RR shorts`);
+    } else if(co.zones.zone === 'discount'){
+      score += 2.5;
+      reasons.push(`Discount zone (${co.zones.percent.toFixed(1)}% of range) - favor longs`);
+    } else if(co.zones.zone === 'premium'){
+      score -= 2.5;
+      reasons.push(`Premium zone (${co.zones.percent.toFixed(1)}% of range) - favor shorts`);
+    }
+    
+    // Displacement quality (imbalance proxy)
+    if(co.displacements.length > 0){
+      const recentDisp = co.displacements[co.displacements.length - 1];
+      if(recentDisp.magnitude >= co.atrClose * 0.9){
+        if(recentDisp.direction === 1){
+          score += 3.0;
+          reasons.push(`Strong displacement UP (${recentDisp.magnitude.toFixed(2)} >= ${(co.atrClose * 0.9).toFixed(2)})`);
+        } else {
+          score -= 3.0;
+          reasons.push(`Strong displacement DOWN (${recentDisp.magnitude.toFixed(2)} >= ${(co.atrClose * 0.9).toFixed(2)})`);
+        }
+      }
+    }
+    
+    // POI proximity (entry quality)
+    if(co.poiCheck.atPOI){
+      score += 6.0; // Strong bonus for being at key level
+      reasons.push(`âœ… AT POI: ${co.poiCheck.poiType} (distance: ${co.poiCheck.distance.toFixed(2)})`);
+    } else {
+      score -= 3.0; // Penalize entries away from structure
+      reasons.push(`âŒ NOT at POI - wait for pullback to key level`);
+    }
+    
+    // Confirmation flag (Rule 50 gating)
+    if(!co.confirmationFlag){
+      score -= 10.0; // Heavy penalty - no trade without confirmation
+      reasons.push(`âŒ CONFIRMATION FLAG BLOCKED (need: BOS + displacement + retest)`);
+    } else {
+      reasons.push(`âœ… Confirmation flag PASSED (BOS + displacement + POI retest)`);
+    }
+    
+    // Liquidity pools (sweep setups)
+    if(co.liquidityPools.length > 0){
+      reasons.push(`${co.liquidityPools.length} liquidity pool(s) detected (potential sweep zones)`);
+    }
+  }
   
   // 1) REVERSE SLOPE: Fade recent momentum (buy dips, sell rips)
   score -= slopeClamped * 6;  // REVERSED and REDUCED weight
@@ -17045,6 +17676,60 @@ async function runAnalysis(){
   // ========== PATTERN CONFLUENCE ANALYSIS (EDUCATIONAL FRAMEWORK) ==========
   const confluence = analyzePatternConfluence(base);
   STATE._lastConfluence = confluence; // Store for UI display
+  
+  // ========== INTELLIGENT MODE DETECTION & CLOSE-ONLY ANALYSIS ==========
+  // Auto-detect data quality and switch to close-only mode if needed
+  let closeOnlyMode = false;
+  let ohlcQuality = 0; // 0-100 score
+  
+  // Check OHLC data completeness
+  if(base && base.length > 0){
+    let validOHLC = 0;
+    for(const bar of base){
+      if(Number.isFinite(bar.o) && Number.isFinite(bar.h) && 
+         Number.isFinite(bar.l) && Number.isFinite(bar.c) &&
+         bar.h >= bar.l && bar.h >= bar.o && bar.h >= bar.c &&
+         bar.l <= bar.o && bar.l <= bar.c){
+        validOHLC++;
+      }
+    }
+    ohlcQuality = (validOHLC / base.length) * 100;
+  }
+  
+  // Decision logic: Switch to LINE_ONLY if OHLC quality poor or chart rendering failed
+  if(STATE.analysisMode === 'AUTO'){
+    if(ohlcQuality < 80){
+      closeOnlyMode = true;
+      console.log(`🔄 AUTO MODE: Switching to LINE_ONLY (OHLC quality: ${ohlcQuality.toFixed(1)}%)`);
+    } else {
+      console.log(`âœ… AUTO MODE: Using OHLC_FULL (quality: ${ohlcQuality.toFixed(1)}%)`);
+    }
+  } else if(STATE.analysisMode === 'LINE_ONLY'){
+    closeOnlyMode = true;
+    console.log('📊 FORCED LINE_ONLY mode');
+  }
+  
+  // Run close-only analysis when needed
+  if(closeOnlyMode){
+    STATE.closeOnlyData = runCloseOnlyAnalysis(base, STATE.interval);
+    console.log('[CLOSE-ONLY] Analysis complete:', STATE.closeOnlyData.valid ? 'VALID âœ…' : 'INVALID âŒ');
+    
+    if(STATE.closeOnlyData.valid){
+      console.log('[CLOSE-ONLY] Pivots:', STATE.closeOnlyData.pivots.length);
+      console.log('[CLOSE-ONLY] Structure:', STATE.closeOnlyData.structure.trend);
+      console.log('[CLOSE-ONLY] BOS:', STATE.closeOnlyData.bosDirection === 1 ? 'UP↑' : 
+                                        STATE.closeOnlyData.bosDirection === -1 ? 'DOWN↓' : 'NONE');
+      console.log('[CLOSE-ONLY] CHoCH:', STATE.closeOnlyData.chochDetected ? 'YES' : 'NO');
+      console.log('[CLOSE-ONLY] Displacements:', STATE.closeOnlyData.displacements.length);
+      console.log('[CLOSE-ONLY] At POI:', STATE.closeOnlyData.poiCheck.atPOI ? 
+                  `YES (${STATE.closeOnlyData.poiCheck.poiType})` : 'NO');
+      console.log('[CLOSE-ONLY] Confirmation Flag:', STATE.closeOnlyData.confirmationFlag ? 'âœ… PASS' : 'âŒ BLOCK');
+      console.log('[CLOSE-ONLY] Zone:', STATE.closeOnlyData.zones.zone, 
+                  `(${STATE.closeOnlyData.zones.percent.toFixed(1)}%)`);
+    }
+  } else {
+    STATE.closeOnlyData = null;
+  }
   
   // ========== ICT/SMC 12-POINT COMPREHENSIVE ANALYSIS ==========
   const ictAnalysis = runICTAnalysis(base, fundamentals);
