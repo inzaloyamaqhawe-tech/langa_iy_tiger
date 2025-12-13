@@ -7521,10 +7521,10 @@ function runICTAnalysis(d, fundamentals = {}){
     // DIRECTION: Use confirmation direction (from BOS)
     const direction = intendedDirection === 1 ? 'LONG' : 'SHORT';
     
-    // FIXED: Wider TPs for crypto volatility (was 1.5R/2R/2.5R = 42% win rate)
-    const tp1 = direction === 'LONG' ? entry + (slDistance * 2.5) : (direction === 'SHORT' ? entry - (slDistance * 2.5) : entry);
-    const tp2 = direction === 'LONG' ? entry + (slDistance * 3.5) : (direction === 'SHORT' ? entry - (slDistance * 3.5) : entry);
-    const tp3 = direction === 'LONG' ? entry + (slDistance * 5.0) : (direction === 'SHORT' ? entry - (slDistance * 5.0) : entry);
+    // TP calculation: 1R, 1.5R, 2R for all setups
+    const tp1 = direction === 'LONG' ? entry + (slDistance * 1.0) : (direction === 'SHORT' ? entry - (slDistance * 1.0) : entry);
+    const tp2 = direction === 'LONG' ? entry + (slDistance * 1.5) : (direction === 'SHORT' ? entry - (slDistance * 1.5) : entry);
+    const tp3 = direction === 'LONG' ? entry + (slDistance * 2.0) : (direction === 'SHORT' ? entry - (slDistance * 2.0) : entry);
     
     // ========== PATTERN SHAPE BONUS SCORING ==========
     // Per research: Add bonus points for pattern confluence
@@ -9326,10 +9326,10 @@ function calculateRiskReward(d, signal, interval){
       
       stopDistance = entry - stopLoss;
       
-      // Targets based on R multiples (1.5R, 2.5R, 4R)
-      takeProfit1 = entry + (stopDistance * 1.5); // 1.5R
-      takeProfit2 = entry + (stopDistance * 2.5); // 2.5R
-      takeProfit3 = entry + (stopDistance * 4.0); // 4R
+      // Targets based on R multiples (1R, 1.5R, 2R)
+      takeProfit1 = entry + (stopDistance * 1.0); // 1R
+      takeProfit2 = entry + (stopDistance * 1.5); // 1.5R
+      takeProfit3 = entry + (stopDistance * 2.0); // 2R
       
       // Adjust TP3 if swing high is nearby (don't target beyond resistance)
       if(Number.isFinite(swingHigh) && swingHigh > entry){
@@ -9354,10 +9354,10 @@ function calculateRiskReward(d, signal, interval){
       
       stopDistance = stopLoss - entry; // Distance is positive (SL above entry)
       
-      // Targets BELOW entry for shorts
-      takeProfit1 = entry - (stopDistance * 1.5); // 1.5R below
-      takeProfit2 = entry - (stopDistance * 2.5); // 2.5R below
-      takeProfit3 = entry - (stopDistance * 4.0); // 4R below
+      // Targets BELOW entry for shorts (1R, 1.5R, 2R)
+      takeProfit1 = entry - (stopDistance * 1.0); // 1R below
+      takeProfit2 = entry - (stopDistance * 1.5); // 1.5R below
+      takeProfit3 = entry - (stopDistance * 2.0); // 2R below
       
       // Adjust TP3 if swing low is nearby
       if(Number.isFinite(swingLow) && swingLow < entry){
@@ -17698,10 +17698,10 @@ function calculatePendingOrder(d, direction, score, reasons){
   
   const slDistance = Math.abs(entryPOI - stopLoss);
   
-  // Calculate take profits (R-multiples)
-  const tp1 = direction === 'LONG' ? entryPOI + (slDistance * 2.5) : entryPOI - (slDistance * 2.5);
-  const tp2 = direction === 'LONG' ? entryPOI + (slDistance * 3.5) : entryPOI - (slDistance * 3.5);
-  const tp3 = direction === 'LONG' ? entryPOI + (slDistance * 5.0) : entryPOI - (slDistance * 5.0);
+  // Calculate take profits (R-multiples): 1R, 1.5R, 2R
+  const tp1 = direction === 'LONG' ? entryPOI + (slDistance * 1.0) : entryPOI - (slDistance * 1.0);
+  const tp2 = direction === 'LONG' ? entryPOI + (slDistance * 1.5) : entryPOI - (slDistance * 1.5);
+  const tp3 = direction === 'LONG' ? entryPOI + (slDistance * 2.0) : entryPOI - (slDistance * 2.0);
   
   // Position sizing (reduce if indicators oppose or far from POI)
   let positionMultiplier = 1.0;
@@ -17924,7 +17924,7 @@ function heuristicPredictWithPendingOrders(baseOverride){
   reasons.push(`📊 HTF Bias: ${direction} (score: ${htfScore.toFixed(1)})`);
   reasons.push(`📍 Pending order at ${pendingOrder.poiType}`);
   reasons.push(`🎯 Entry: ${pendingOrder.entry.toFixed(2)} | SL: ${pendingOrder.stopLoss.toFixed(2)}`);
-  reasons.push(`🎯 Targets: TP1=${pendingOrder.tp1.toFixed(2)} (2.5R) | TP2=${pendingOrder.tp2.toFixed(2)} (3.5R)`);
+  reasons.push(`🎯 Targets: TP1=${pendingOrder.tp1.toFixed(2)} (1R) | TP2=${pendingOrder.tp2.toFixed(2)} (1.5R) | TP3=${pendingOrder.tp3.toFixed(2)} (2R)`);
   reasons.push(`📋 Status: ${pendingOrder.orderStatus}`);
   
   return {
@@ -18899,9 +18899,9 @@ async function runAnalysis(){
     pendingText += `Direction: ${po.direction}\n`;
     pendingText += `Entry: ${po.entry.toFixed(2)} (${po.poiType})\n`;
     pendingText += `Stop Loss: ${po.stopLoss.toFixed(2)}\n`;
-    pendingText += `TP1: ${po.tp1.toFixed(2)} (2.5R)\n`;
-    pendingText += `TP2: ${po.tp2.toFixed(2)} (3.5R)\n`;
-    pendingText += `TP3: ${po.tp3.toFixed(2)} (5.0R)\n`;
+    pendingText += `TP1: ${po.tp1.toFixed(2)} (1R)\n`;
+    pendingText += `TP2: ${po.tp2.toFixed(2)} (1.5R)\n`;
+    pendingText += `TP3: ${po.tp3.toFixed(2)} (2R)\n`;
     pendingText += `Position Size: ${(po.positionSize * 100).toFixed(0)}% of base\n`;
     pendingText += `Status: ${po.orderStatus}\n`;
     
