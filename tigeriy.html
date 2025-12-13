@@ -6956,7 +6956,7 @@ function runCloseOnlyAnalysis(d, interval='1h'){
 // Comprehensive 12-point ICT/SMC Analysis System
 function runICTAnalysis(d, fundamentals = {}){
   try{
-    if(!Array.isArray(d) || d.length < 50) return {goTrade: false, reason: 'Insufficient data'};
+    if(!Array.isArray(d) || d.length < 50) return {goTrade: false, reason: 'Insufficient data', score: 0, direction: 'LONG', confidence: 0};
     
     const last = d[d.length - 1];
     const structure = computeStructure(d);
@@ -7419,6 +7419,7 @@ function runICTAnalysis(d, fundamentals = {}){
     
     // Final Decision - STRUCTURE-FIRST THRESHOLDS
     const finalScore = (score / maxScore) * 100;
+    console.log('[ICT SCORING] score:', score, '/ maxScore:', maxScore, '= finalScore:', finalScore.toFixed(2) + '%');
     const eventWindowBlock = fundamentals.eventWindow?.disable || false;
     
     // ========== STRUCTURE-FIRST: CONFIRMATION FLAG GATING ==========
