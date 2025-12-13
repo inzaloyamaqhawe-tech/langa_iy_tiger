@@ -64,7 +64,10 @@
       <input type="text" id="username" placeholder="Enter your username" autocomplete="username" />
       
       <label for="password">Password</label>
-      <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" />
+      <div style="position: relative;">
+        <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" style="width: 100%; padding-right: 40px;" />
+        <button type="button" id="togglePassword" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; padding: 5px;">👁️</button>
+      </div>
       
       <button id="loginBtn">Login</button>
       
@@ -77,7 +80,7 @@
   <div class="max-w-4xl mx-auto space-y-4">
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5OjcBCgoKDQwNGg8PGjclHyU3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3N//AABEIAJQAlAMBIgACEQEDEQH/xAAcAAACAwEBAQEAAAAAAAAAAAAFBgAEBwMCAQj/xAA5EAABAwMCBAQEAwgDAQEBAAABAgMEAAUREiEGMUFREyJhcQcUMoEjkaEVFiRCYrHB8FJy0QPx4f/EABkBAAMBAQEAAAAAAAAAAAAAAAIDBQQBAP/EACkRAAICAgICAQMDBQAAAAAAAAECAAMRIRIxBEEiEzJRYXGhI5GxwfD/2gAMAwEAAhEDEQA/AFi23shhtBO3mGT96YhKdiu+ITkD+Xn/+0tyH/l2lEkjtRvh2eLqwGJLIU6nY74Kx3HrWKhzN/lVgEYjTY+IPGT4Ujzk7II+lQ9uaaNodZ8xYWdBOdKuaT/5S/D4VZbJcLxZQTkoUgFST6EUXasZCCUzFn+oowaZaxUZmWtQTicrnHjSWy2/gpOyhiqfD9nlaJDPjkR0LKWlZ+oUWcajwkBUhXjLHcc68Q740H0t/hpSThKRzqK1gLHMqKjBNRK45s9xgPJf/AHd/abJICVpeUrHumhNntV5kJRLasNst4CiR4qDqwfTNaxduIo8KC6++UobbGSrIrGLjfOIeMpim7S283ECiAGyUJxnGVK/wK1K3MYTQ/JihyU5bv8RsuN1tVqjpiTLjoeVsQg8z19qDxOM7c7czFeXnKglC8ZTmrP7qxWOHFQbqGPFKDqfSN0K75PPpQfgyxwkGUErSqelag04vBykHYhNIRKODMST/AN3NbPdyAAGI6O8OWW6gOuxWHFKGy0j/ACKpK4As0L+LYelw9JyXGnCdNIsti+WKcozpb8QElTTRKmSc5xWncI8SyX4obuEb+JSjUSg5Q6nuD/iiKWVAEPlYosLCcLuVhfLa3JiWuLe/mZOvC1c8ADr71wtkJoTZE6a2gyfFKUDH0gdv1o+7H4WnOpnogRlSmV5Di0F0qzkbZ70rW2c9qU0cpQ2N8cq
+        <span style="font-size: 32px;">🐯</span>
         IY TIGER GROWTH
       </h1>
       <div class="flex items-center gap-2">
@@ -20034,6 +20037,7 @@ async function runAnalysis(){
         
         const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
         tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
+        }
       }
     }catch(e){ console.warn('[ICT Display]', e); }
     
@@ -20861,9 +20865,9 @@ if(btnSaveSettings){
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const USERS = {
-  'Langa': { password: 'D4S4W3232', role: 'Admin' },
-  'Sandy': { password: 'Skeem200.com', role: 'Trader' },
-  'Sibusiso': { password: 'Sb200@Trade', role: 'Trader' }
+  'langa': { password: 'D4S4W3232', role: 'Admin', displayName: 'Langa' },
+  'sandy': { password: 'Skeem200.com', role: 'Trader', displayName: 'Sandy' },
+  'sibusiso': { password: 'Sb200@Trade', role: 'Trader', displayName: 'Sibusiso' }
 };
 
 let currentUser = null;
@@ -20896,8 +20900,8 @@ function showApp() {
 
 // Handle login
 function handleLogin() {
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value;
+  const username = document.getElementById('username').value.trim().toLowerCase(); // Case-insensitive username
+  const password = document.getElementById('password').value; // Case-sensitive password
   const errorEl = document.getElementById('loginError');
   
   // Reset error
@@ -20907,7 +20911,7 @@ function handleLogin() {
   if (USERS[username] && USERS[username].password === password) {
     // Successful login
     currentUser = {
-      username: username,
+      username: USERS[username].displayName, // Use display name for UI
       role: USERS[username].role,
       loginTime: new Date().toISOString()
     };
@@ -20959,6 +20963,18 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Login button click
   document.getElementById('loginBtn').addEventListener('click', handleLogin);
+  
+  // Password visibility toggle
+  document.getElementById('togglePassword').addEventListener('click', function() {
+    const passwordField = document.getElementById('password');
+    if (passwordField.type === 'password') {
+      passwordField.type = 'text';
+      this.textContent = '🙈'; // Hide icon when visible
+    } else {
+      passwordField.type = 'password';
+      this.textContent = '👁️'; // Eye icon when hidden
+    }
+  });
   
   // Enter key on password field
   document.getElementById('password').addEventListener('keypress', function(e) {
