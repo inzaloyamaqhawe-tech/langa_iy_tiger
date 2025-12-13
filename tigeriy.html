@@ -16936,9 +16936,9 @@ async function runAnalysis(){
     return;
   }
   attachIndicators(base);
-  const snapshot = buildSnapshot();
   
   // ========== NEWS EVENT & FUNDAMENTAL BIAS (DETERMINISTIC) ==========
+  // CRITICAL: Load news data FIRST before building snapshot for AI
   // Check news bias for current symbol using rule-based framework
   const newsBias = getNewsBiasForSymbol(STATE.symbol);
   const eventWindow = checkEventTradingWindow(STATE.symbol);
@@ -16986,6 +16986,11 @@ async function runAnalysis(){
   STATE._lastICTAnalysis = ictAnalysis; // Store for UI display
   console.log('[ICT] 12-Point Analysis on', STATE.interval, 'interval | Data:', base.length, 'bars | Score:', ictAnalysis.score + '%', '| GO TRADE:', ictAnalysis.goTrade ? 'YES âœ…' : 'NO âŒ', '| Direction:', ictAnalysis.direction || 'NEUTRAL');
   
+  
+  // ========== BUILD SNAPSHOT FOR AI (AFTER ALL DATA LOADED) ==========
+  // CRITICAL: Build snapshot AFTER indicators attached, news loaded, and fundamentals complete
+  const snapshot = buildSnapshot();
+  console.log('[SNAPSHOT] Built for AI | Price:', snapshot.current_price, '| RSI:', snapshot.rsi, '| News:', fundamentals.headlines?.length || 0);
   // ========== SELF-CONTAINED AI ENGINE (NO EXTERNAL API NEEDED) ==========
   // Start with heuristic baseline (indicators + structure)
   // ICT analysis is shown separately - does NOT influence this recommendation
@@ -19561,6 +19566,8 @@ if(btnSaveSettings){
 </script>
 </body>
 </html>
+
+
 
 
 
