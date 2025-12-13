@@ -19716,6 +19716,13 @@ async function runAnalysis(){
     try{
       const ict = STATE._lastICTAnalysis;
       if(ict){
+        // Get last candle for current price
+        const last = (STATE.history && STATE.history.length > 0) ? STATE.history[STATE.history.length - 1] : null;
+        if(!last || !last.c){
+          console.warn('[ICT Display] No valid price data');
+          return;
+        }
+        
         const ictLines = [];
         ictLines.push(`<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━`);
         
