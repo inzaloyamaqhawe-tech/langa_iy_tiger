@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -17943,62 +17943,92 @@ function heuristicPredictWithPendingOrders(baseOverride){
 /**
  * UNIFIED CONSENSUS ENGINE - Ensures all components agree
  * Prevents conflicting signals across Edge, Horizon, ICT, News, AI
+ * NEVER returns WAIT - always provides directional bias
  */
 function unifiedConsensus(ictScore, newsBias, aiRecommendation, technicalBias, patternBias) {
-  const votes = { BUY: 0, SELL: 0, WAIT: 0 };
+  const votes = { BUY: 0, SELL: 0, NEUTRAL: 0 };
   
   // ICT Score Vote (-10 to +10)
   if (ictScore > 3) votes.BUY++;
   else if (ictScore < -3) votes.SELL++;
-  else votes.WAIT++;
+  else votes.NEUTRAL++; // Neutral votes will strengthen the majority
   
   // News Bias Vote (-2 to +2)
   if (newsBias > 0.5) votes.BUY++;
   else if (newsBias < -0.5) votes.SELL++;
-  else votes.WAIT++;
+  else votes.NEUTRAL++;
   
   // AI Recommendation Vote
   const aiRec = String(aiRecommendation || '').toUpperCase();
-  if (aiRec.includes('BUY')) votes.BUY++;
-  else if (aiRec.includes('SELL')) votes.SELL++;
-  else votes.WAIT++;
+  if (aiRec.includes('BUY') || aiRec.includes('LONG')) votes.BUY++;
+  else if (aiRec.includes('SELL') || aiRec.includes('SHORT')) votes.SELL++;
+  else votes.NEUTRAL++;
   
   // Technical Bias Vote (from indicators)
   if (technicalBias > 0) votes.BUY++;
   else if (technicalBias < 0) votes.SELL++;
-  else votes.WAIT++;
+  else votes.NEUTRAL++;
   
   // Pattern Bias Vote
   if (patternBias > 0) votes.BUY++;
   else if (patternBias < 0) votes.SELL++;
-  else votes.WAIT++;
+  else votes.NEUTRAL++;
   
-  // Calculate consensus (need 80% agreement = 4 out of 5)
-  const total = votes.BUY + votes.SELL + votes.WAIT;
+  // Distribute NEUTRAL votes to the stronger side (adds conviction)
+  if (votes.BUY > votes.SELL) {
+    votes.BUY += votes.NEUTRAL;
+  } else if (votes.SELL > votes.BUY) {
+    votes.SELL += votes.NEUTRAL;
+  } else {
+    // Perfect tie - split NEUTRAL votes, favor BUY on exact tie
+    votes.BUY += Math.ceil(votes.NEUTRAL / 2);
+    votes.SELL += Math.floor(votes.NEUTRAL / 2);
+  }
+  
+  const total = votes.BUY + votes.SELL; // NEUTRAL already distributed
   const buyPercent = (votes.BUY / total) * 100;
   const sellPercent = (votes.SELL / total) * 100;
   
-  if (buyPercent >= 80) {
+  // Strong consensus (>= 75%)
+  if (buyPercent >= 75) {
     return {
       recommendation: votes.BUY >= 4 ? 'STRONG BUY' : 'BUY',
-      confidence: buyPercent,
-      agreement: `${votes.BUY}/${total} components agree`,
+      confidence: Math.round(buyPercent),
+      agreement: `Strong: ${votes.BUY}/${total} favor BUY`,
       consensusReached: true
     };
-  } else if (sellPercent >= 80) {
+  } else if (sellPercent >= 75) {
     return {
       recommendation: votes.SELL >= 4 ? 'STRONG SELL' : 'SELL',
-      confidence: sellPercent,
-      agreement: `${votes.SELL}/${total} components agree`,
+      confidence: Math.round(sellPercent),
+      agreement: `Strong: ${votes.SELL}/${total} favor SELL`,
       consensusReached: true
     };
-  } else {
-    // No consensus - use BUY vs SELL votes to determine direction
+  } 
+  // Moderate consensus (60-75%) - use pending orders
+  else if (buyPercent >= 60) {
+    return {
+      recommendation: 'PENDING LONG',
+      confidence: Math.round(buyPercent),
+      agreement: `Moderate: ${votes.BUY}/${total} favor BUY - pending setup`,
+      consensusReached: true
+    };
+  } else if (sellPercent >= 60) {
+    return {
+      recommendation: 'PENDING SHORT',
+      confidence: Math.round(sellPercent),
+      agreement: `Moderate: ${votes.SELL}/${total} favor SELL - pending setup`,
+      consensusReached: true
+    };
+  }
+  // Weak consensus (<60%) - still provide direction based on majority
+  else {
     const direction = votes.BUY >= votes.SELL ? 'PENDING LONG' : 'PENDING SHORT';
+    const confidence = Math.round(Math.max(buyPercent, sellPercent));
     return {
       recommendation: direction,
-      confidence: 55,
-      agreement: `Weak consensus: BUY=${votes.BUY} SELL=${votes.SELL} - ${direction}`,
+      confidence: Math.max(52, confidence),
+      agreement: `Weak: BUY=${votes.BUY} SELL=${votes.SELL} - ${direction} at POI`,
       consensusReached: true
     };
   }
