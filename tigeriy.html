@@ -15926,19 +15926,71 @@ function computeModuleDecision(baseArr, view){
     conf = Math.max(0, conf - (0.5 * Math.max(0, getBarsToCheck(view) - d.length)));
   }catch{}
 
-  // Decision synthesis: ALWAYS give BUY or SELL, use probability to show confidence
+  // Decision synthesis: STRICT FILTERING - Only trade when signal is STRONG
+  // USER REPORTED 83% LOSS RATE - Root cause: trading on weak/conflicting signals
   const aggSide = side>0?1:(side<0?-1:0);
-  let recommendation = aggSide > 0 ? 'BUY' : 'SELL'; // NEVER HOLD
+  
+  // MINIMUM THRESHOLD: Side must be strong enough to justify trade
+  // If weights sum to ~1.0, typical strong signal is |side| >= 0.35
+  const MIN_SIDE_STRENGTH = 0.30; // Require at least 30% weighted agreement
+  const sideStrength = Math.abs(side);
+  
+  // DEFAULT TO HOLD if signal is weak or conflicting
+  let recommendation = 'HOLD';
+  
+  // Only trade if side strength meets minimum threshold
+  if(sideStrength >= MIN_SIDE_STRENGTH){
+    recommendation = aggSide > 0 ? 'BUY' : 'SELL';
+  }
+  
   let probability = Math.max(40, Math.min(99, Math.round(conf)));
   // checklist proxy: prefer more confirmations when targeting live trades
   const checks = reasons.length;
   const mode = (RISK_MODE||'Balanced').toLowerCase();
-  const minProb = mode==='aggressive' ? 74 : (mode==='safe' ? 85 : 80);
-  const strongProb = mode==='aggressive' ? 86 : (mode==='safe' ? 92 : 90);
-  const minChecks = mode==='aggressive' ? 4 : (mode==='safe' ? 6 : 5);
-  if(probability>=minProb && aggSide!==0 && checks>=minChecks){ recommendation = aggSide>0 ? 'BUY' : 'SELL'; }
-  // very strong signal
-  if(probability>=strongProb && aggSide!==0 && checks>=(minChecks+1)) recommendation = (aggSide>0?'STRONG BUY':'STRONG SELL');
+  const minProb = mode==='aggressive' ? 78 : (mode==='safe' ? 88 : 82); // Raised thresholds
+  const strongProb = mode==='aggressive' ? 88 : (mode==='safe' ? 94 : 92); // Raised thresholds
+  const minChecks = mode==='aggressive' ? 5 : (mode==='safe' ? 7 : 6); // Raised from 4/6/5
+  
+  // Only upgrade to STRONG if both probability AND checks are very high
+  if(recommendation !== 'HOLD' && probability>=minProb && aggSide!==0 && checks>=minChecks){ 
+    recommendation = aggSide>0 ? 'BUY' : 'SELL'; 
+  } else if(recommendation !== 'HOLD' && (probability < minProb || checks < minChecks)){
+    // Signal exists but not strong enough - downgrade to HOLD
+    recommendation = 'HOLD';
+  }
+  
+  // very strong signal - requires BOTH high probability AND extra checks
+  if(recommendation !== 'HOLD' && probability>=strongProb && aggSide!==0 && checks>=(minChecks+2)){ // Changed +1 to +2
+    recommendation = (aggSide>0?'STRONG BUY':'STRONG SELL');
+  }
+  
+  // CRITICAL SAFETY CHECK: Don't BUY at resistance or SELL at support
+  // This prevents the 83% loss rate from buying tops and selling bottoms
+  if(recommendation !== 'HOLD'){
+    try{
+      const structure = computeStructure(d);
+      const swing = structure.lastSwing;
+      if(swing && Number.isFinite(swing.high) && Number.isFinite(swing.low)){
+        const swingRange = swing.high - swing.low;
+        const currentLevel = (last.c - swing.low) / swingRange; // 0 = bottom, 1 = top
+        
+        // In PREMIUM zone (70%+ of range) - DON'T BUY, only SELL
+        // In DISCOUNT zone (30%- of range) - DON'T SELL, only BUY
+        if(recommendation.includes('BUY') && currentLevel > 0.65){
+          reasons.push('⚠️ FILTERED: BUY signal rejected - price in PREMIUM zone (top 35% of range)');
+          recommendation = 'HOLD';
+          probability = Math.max(40, probability - 15); // Penalty
+        }
+        if(recommendation.includes('SELL') && currentLevel < 0.35){
+          reasons.push('⚠️ FILTERED: SELL signal rejected - price in DISCOUNT zone (bottom 35% of range)');
+          recommendation = 'HOLD';
+          probability = Math.max(40, probability - 15); // Penalty
+        }
+      }
+    }catch(e){
+      console.warn('[Price zone filter]', e);
+    }
+  }
   return { recommendation, probability, reasons, source:'MODULES', diag:{ confidence: Math.round(conf), side: aggSide } };
 }
 
