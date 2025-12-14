@@ -16076,6 +16076,48 @@ function computeModuleDecision(baseArr, view){
     // Simple time-decay on signals: older confluences should not dominate
     conf = Math.max(0, conf - (0.5 * Math.max(0, getBarsToCheck(view) - d.length)));
   }catch{}
+  
+  // 10) CRITICAL: Edge & Horizon metrics (USER DEMAND - fix BUY when Edge says DOWN)
+  // Compute horizon metrics and use edgeScore to bias the recommendation
+  try{
+    const hm = computeHorizonMetrics(d, view, null, null);
+    if(hm && Number.isFinite(hm.edgeScore)){
+      // Edge score ranges from -20 to +20
+      // Strong edge should OVERRIDE weak technical signals
+      const edgeWeight = 0.35; // Significant weight - user complaint about ignoring Edge
+      
+      if(hm.edgeScore >= 10){
+        // Strong bullish edge from horizon/structure
+        side += edgeWeight * 1;
+        conf += Math.abs(hm.edgeScore) * 4; // +40 to +80 confidence boost
+        reasons.push(`📈 Edge: ${hm.edgeScore}/20 (${hm.edgeReasons.slice(0,2).join(', ')})`);
+      } else if(hm.edgeScore <= -10){
+        // Strong bearish edge from horizon/structure
+        side += edgeWeight * -1;
+        conf += Math.abs(hm.edgeScore) * 4;
+        reasons.push(`📉 Edge: ${hm.edgeScore}/20 (${hm.edgeReasons.slice(0,2).join(', ')})`);
+      } else if(Math.abs(hm.edgeScore) >= 5){
+        // Moderate edge - add as confirmation
+        side += edgeWeight * Math.sign(hm.edgeScore) * 0.5;
+        conf += Math.abs(hm.edgeScore) * 2;
+        reasons.push(`Edge: ${hm.edgeScore}/20 (${hm.edgeReasons[0] || 'mixed'})`);
+      }
+      
+      // CRITICAL: If expectedMovePct shows strong direction, emphasize it
+      if(Number.isFinite(hm.expectedMovePct) && Number.isFinite(hm.structureBias)){
+        const expectedDirection = Math.sign(hm.structureBias); // -1 for down, +1 for up
+        const moveSize = Math.abs(hm.expectedMovePct);
+        
+        if(moveSize >= 0.003 && Math.abs(hm.structureBias) > 0.3){
+          // Expected move > 0.3% with clear structure bias
+          side += 0.15 * expectedDirection;
+          reasons.push(`Horizon: ${(hm.expectedMovePct * 100).toFixed(2)}% expected ${expectedDirection > 0 ? 'UP⬆️' : 'DOWN⬇️'}`);
+        }
+      }
+    }
+  }catch(e){
+    console.warn('[Edge Integration]', e);
+  }
 
   // Decision synthesis: STRICT FILTERING - Only trade when signal is STRONG
   // USER CORRECTION: Weak signals should be PENDING (not HOLD)
@@ -20148,9 +20190,20 @@ async function runAnalysis(){
             // CRITICAL: Update the actual recommendation variable (not just display)
             out.recommendation = newRec;
             
+            // Update reasons to remove 'awaiting confirmation' since we're now executing
+            if(out.reasons && Array.isArray(out.reasons)){
+              out.reasons = out.reasons.filter(r => !/awaiting|pending|wait/i.test(r));
+              out.reasons.unshift(`✅ Price at entry zone (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) - executing immediately`);
+            }
+            
             // Update the main recommendation display at top of page
             if(recEl){
               setText(recEl, `Recommendation: ${newRec}`);
+            }
+            
+            // Update reasons display
+            if(reasonsEl && out.reasons){
+              setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
             }
             
             // Update the trade plan UI text to show upgrade
