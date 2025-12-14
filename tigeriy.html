@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Inzalo Yamaqhawe</title>
-<!-- Version: 2025-12-13-SL-1R-FIXED -->
+<!-- Version: 2025-12-14-PENDING-SETUP-DISPLAY-FIXED -->
 <!-- Use static Tailwind CSS to avoid runtime CDN warnings in console -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
 <!-- Chart.js v4 UMD -->
@@ -64,8 +64,8 @@
       <input type="text" id="username" placeholder="Enter your username" autocomplete="username" />
       
       <label for="password">Password</label>
-      <div style="position: relative;">
-        <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" style="width: 100%; padding-right: 40px;" />
+      <div style="position: relative; margin-bottom: 16px;">
+        <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" style="width: 100%; padding-right: 40px; margin-bottom: 0;" />
         <button type="button" id="togglePassword" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; padding: 5px;">👁️</button>
       </div>
       
@@ -11042,7 +11042,7 @@ function analyzeMTF(currentInterval){
 function evaluateAPlusSetup(data, direction){
   try{
     if(!Array.isArray(data) || data.length < 50) {
-      return {score: 0, checks: [], recommendation: 'PENDING LONG', reason: 'Insufficient data - default LONG bias'};
+      return {score: 0, checks: [], recommendation: 'WAIT', reason: 'Insufficient data for setup'};
     }
     
     let score = 0;
@@ -11242,7 +11242,7 @@ function evaluateAPlusSetup(data, direction){
     
   }catch(e){
     console.warn('⚠️ evaluateAPlusSetup error:', e);
-    return {score: 0, checks: [], recommendation: 'PENDING LONG', reason: 'Error evaluating setup - default LONG bias'};
+    return {score: 0, checks: [], recommendation: 'WAIT', reason: 'Error evaluating setup'};
   }
 }
 
@@ -11391,12 +11391,86 @@ function fastFVGScore(fvg, data, structure, emas, rsiVal){
 }
 
 /**
+ * Generate pending setup with values when waiting for confirmation
+ */
+function generatePendingForDecisionTree(data, direction, checks, reason){
+  try{
+    const last = data[data.length - 1];
+    const atr = last.atr || 0.001;
+    const structure = computeStructure(data);
+    const fvgs = computeFVGs(data);
+    
+    // Find POI (FVG or structure level)
+    let entryPrice = last.c;
+    const relevantFVGs = direction === 'LONG'
+      ? fvgs.filter(f => f.type === 'bull' && !f.disrespected)
+      : fvgs.filter(f => f.type === 'bear' && !f.disrespected);
+    
+    if(relevantFVGs.length > 0){
+      const fvg = relevantFVGs[relevantFVGs.length - 1];
+      entryPrice = (fvg.y1 + fvg.y2) / 2; // FVG midpoint
+    } else if(structure.lastSwing){
+      // Use retracement level
+      const swing = structure.lastSwing;
+      entryPrice = direction === 'LONG'
+        ? swing.low + (swing.high - swing.low) * 0.382
+        : swing.high - (swing.high - swing.low) * 0.382;
+    }
+    
+    // Calculate levels using user's exact ratios
+    const slDistance = atr * 1.0; // 1.0×ATR (user's ratio)
+    const stopLoss = direction === 'LONG' ? entryPrice - slDistance : entryPrice + slDistance;
+    const riskAmount = Math.abs(entryPrice - stopLoss);
+    const tp1 = direction === 'LONG' ? entryPrice + (riskAmount * 1.0) : entryPrice - (riskAmount * 1.0); // 1R (user's ratio)
+    const tp2 = direction === 'LONG' ? entryPrice + (riskAmount * 1.5) : entryPrice - (riskAmount * 1.5); // 1.5R (user's ratio)
+    const tp3 = direction === 'LONG' ? entryPrice + (riskAmount * 2.0) : entryPrice - (riskAmount * 2.0); // 2R (user's ratio)
+    
+    // Generate context explanation
+    const contextParts = [];
+    const trend = direction === 'LONG' ? 'bullish' : 'bearish';
+    const zone = direction === 'LONG' ? 'discount' : 'premium';
+    
+    if(relevantFVGs.length > 0){
+      contextParts.push(`${trend} continuation context with imbalance`);
+    } else {
+      contextParts.push(`${trend} context`);
+    }
+    
+    if(structure.lastSwing){
+      contextParts.push(`placing conditional pending ${direction.toLowerCase()} at POI in ${zone}`);
+    }
+    
+    const context = contextParts.join('; ');
+    
+    return {
+      decision: direction === 'LONG' ? 'PENDING LONG' : 'PENDING SHORT',
+      checks,
+      reason,
+      confidence: 60,
+      pendingSetup: {
+        entry: Number(entryPrice.toFixed(2)),
+        stop: Number(stopLoss.toFixed(2)),
+        tp1: Number(tp1.toFixed(2)),
+        tp2: Number(tp2.toFixed(2)),
+        tp3: Number(tp3.toFixed(2)),
+        context: context,
+        confirmation: 'Micro BOS/CHoCH inside POI with displacement ≥0.7×ATR',
+        microTF: '1m-5m',
+        sizeMultiplier: 0.75 // Reduced size for pending
+      }
+    };
+  }catch(e){
+    return {decision: 'WAIT', checks, reason: 'Cannot generate pending setup'};
+  }
+}
+
+/**
  * Buy/Sell Decision Tree - Fast yes/no checklist
  */
 function evaluateDecisionTree(data, direction){
   try{
     if(!Array.isArray(data) || data.length < 50) {
-      return {decision: direction === 'LONG' ? 'PENDING LONG' : 'PENDING SHORT', checks: [], reason: 'Insufficient data - default bias'};
+      return {decision: 'WAIT', checks: [], reason: 'Insufficient data for decision'};
     }
     
     const checks = [];
@@ -11425,7 +11499,7 @@ function evaluateDecisionTree(data, direction){
       checks.push({q: `HTF ${direction === 'LONG' ? 'up' : 'down'}?`, a: 'YES ✅'});
     } else {
       checks.push({q: `HTF ${direction === 'LONG' ? 'up' : 'down'}?`, a: 'NO ❌ - PENDING at POI'});
-      return {decision: direction === 'LONG' ? 'PENDING LONG' : 'PENDING SHORT', checks, reason: 'HTF not aligned - awaiting structure shift', confidence: 55};
+      return generatePendingForDecisionTree(data, direction, checks, 'HTF not aligned - pending order at POI awaiting structure shift');
     }
     
     // 2. In discount/premium?
@@ -11438,9 +11512,8 @@ function evaluateDecisionTree(data, direction){
         passCount++;
         checks.push({q: `In ${direction === 'LONG' ? 'discount' : 'premium'}?`, a: 'YES ✅'});
       } else {
-        checks.push({q: `In ${direction === 'LONG' ? 'discount' : 'premium'}?`, a: 'NO ❌ - REVERSE BIAS'});
-        const reversedDir = direction === 'LONG' ? 'SHORT' : 'LONG';
-        return {decision: `PENDING ${reversedDir}`, checks, reason: 'Wrong value zone - bias reversed', confidence: 58};
+        checks.push({q: `In ${direction === 'LONG' ? 'discount' : 'premium'}?`, a: 'NO ❌ - pending at correct zone'});
+        return generatePendingForDecisionTree(data, direction, checks, 'Wrong value zone - pending order at correct retracement level');
       }
     } else {
       checks.push({q: `In ${direction === 'LONG' ? 'discount' : 'premium'}?`, a: 'UNKNOWN ⚪'});
@@ -11460,8 +11533,8 @@ function evaluateDecisionTree(data, direction){
     } else if(hasZone){
       checks.push({q: 'Fresh OB/FVG + BOS?', a: 'PARTIAL ⚠️ - Zone but no BOS'});
     } else {
-      checks.push({q: 'Fresh OB/FVG + BOS?', a: 'NO ❌ - PENDING zone creation'});
-      return {decision: direction === 'LONG' ? 'PENDING LONG' : 'PENDING SHORT', checks, reason: 'No quality zone - pending FVG/displacement', confidence: 52};
+      checks.push({q: 'Fresh OB/FVG + BOS?', a: 'NO ❌ - pending zone creation'});
+      return generatePendingForDecisionTree(data, direction, checks, 'No quality zone - pending order awaiting FVG/displacement');
     }
     
     // 4. Confluence (S/R, EMA, AVWAP)?
@@ -11475,8 +11548,8 @@ function evaluateDecisionTree(data, direction){
       passCount++;
       checks.push({q: 'Confluence?', a: 'YES ✅'});
     } else {
-      checks.push({q: 'Confluence?', a: 'NO ❌ - PENDING at confluence'});
-      return {decision: direction === 'LONG' ? 'PENDING LONG' : 'PENDING SHORT', checks, reason: 'No confluence - pending EMA/S/R alignment', confidence: 60};
+      checks.push({q: 'Confluence?', a: 'NO ❌ - pending confluence'});
+      return generatePendingForDecisionTree(data, direction, checks, 'No confluence - pending order awaiting EMA/S/R alignment');
     }
     
     // === PASSED CRITICAL 4 CHECKS ===
@@ -11527,7 +11600,7 @@ function evaluateDecisionTree(data, direction){
     
   }catch(e){
     console.warn('⚠️ evaluateDecisionTree error:', e);
-    return {decision: 'PENDING LONG', checks: [], reason: 'Error evaluating decision tree - default LONG bias', confidence: 50};
+    return {decision: 'WAIT', checks: [], reason: 'Error evaluating decision tree', confidence: 50};
   }
 }
 
@@ -17020,9 +17093,8 @@ function heuristicPredict(baseOverride){
   // If closed-bar mode is enabled, ignore the still-forming bar
   if(BAR_CLOSE_ONLY && d.length>1){ d = d.slice(0, -1); }
   if(!d || d.length < 50) {
-    // Insufficient data - determine HTF bias for pending order anyway
-    const direction = 'LONG'; // Default to LONG when no data
-    return {recommendation:'PENDING LONG', probability:50, reasons:['Insufficient data - default LONG bias'], drivers:[], source:'HEURISTIC', pendingOrder: null};
+    // Insufficient data - cannot generate setup
+    return {recommendation:'WAIT', probability:50, reasons:['Insufficient data'], drivers:[], source:'HEURISTIC', pendingOrder: null};
   }
 
   const last = d[d.length-1];
@@ -19621,9 +19693,33 @@ async function runAnalysis(){
         strategyLines.push(`\n━━━━ DECISION TREE (${topStrategy.direction}) ━━━━`);
         const decisionTree = evaluateDecisionTree(STATE.history, topStrategy.direction);
         
-        const decisionColor = decisionTree.decision === 'GO' ? '🟢' : decisionTree.decision === 'WAIT FOR TRIGGER' ? '🟡' : '🔴';
+        const decisionColor = decisionTree.decision === 'GO' ? '🟢' : decisionTree.decision.includes('PENDING') ? '🟠' : decisionTree.decision === 'WAIT FOR TRIGGER' ? '🟡' : '🔴';
         strategyLines.push(`<strong>Decision: ${decisionTree.decision} ${decisionColor}</strong>`);
         strategyLines.push(`${decisionTree.reason}`);
+        
+        // Show pending setup if available
+        if(decisionTree.pendingSetup){
+          const ps = decisionTree.pendingSetup;
+          const symbol = STATE.symbol || 'Asset';
+          const interval = STATE.interval || '15m';
+          
+          // Context explanation (like user's example)
+          if(ps.context){
+            strategyLines.push(`\n<em>${symbol} is in ${ps.context}, aligned with trend structure.</em>`);
+          }
+          
+          // Pending setup details
+          strategyLines.push(`\n<strong>Pending ${decisionTree.decision.includes('LONG') ? 'Long' : 'Short'} Setup</strong>`);
+          strategyLines.push(`- Asset: ${symbol} (${interval} execution)`);
+          strategyLines.push(`- Entry (limit ${decisionTree.decision.includes('LONG') ? 'buy' : 'sell'}): ${ps.entry}`);
+          strategyLines.push(`- Stop Loss: ${ps.stop}`);
+          strategyLines.push(`- Take Profit 1 (TP1): ${ps.tp1}`);
+          strategyLines.push(`- Take Profit 2 (TP2): ${ps.tp2}`);
+          if(ps.tp3) strategyLines.push(`- Take Profit 3 (TP3): ${ps.tp3}`);
+          strategyLines.push(`- Confirmation: ${ps.confirmation}`);
+          strategyLines.push(`- Micro TF: ${ps.microTF}`);
+          strategyLines.push(`- Position Size: ${(ps.sizeMultiplier * 100).toFixed(0)}% of base`);
+        }
         
         if(decisionTree.checks && decisionTree.checks.length > 0){
           decisionTree.checks.forEach(check => {
