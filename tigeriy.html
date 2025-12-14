@@ -15927,19 +15927,25 @@ function computeModuleDecision(baseArr, view){
   }catch{}
 
   // Decision synthesis: STRICT FILTERING - Only trade when signal is STRONG
-  // USER REPORTED 83% LOSS RATE - Root cause: trading on weak/conflicting signals
+  // USER CORRECTION: Weak signals should be PENDING (not HOLD)
   const aggSide = side>0?1:(side<0?-1:0);
   
-  // MINIMUM THRESHOLD: Side must be strong enough to justify trade
-  // If weights sum to ~1.0, typical strong signal is |side| >= 0.35
-  const MIN_SIDE_STRENGTH = 0.30; // Require at least 30% weighted agreement
+  // THREE-TIER SYSTEM:
+  // 1) Very weak (< 0.15): HOLD - truly neutral/conflicting
+  // 2) Moderate (0.15 - 0.30): PENDING LONG/SHORT - directional bias but wait for better entry
+  // 3) Strong (>= 0.30): BUY/SELL - clear signal, enter now
   const sideStrength = Math.abs(side);
+  const STRONG_THRESHOLD = 0.30;    // Direct entry
+  const PENDING_THRESHOLD = 0.15;   // Conditional entry (pending)
   
-  // DEFAULT TO HOLD if signal is weak or conflicting
-  let recommendation = 'HOLD';
+  let recommendation = 'HOLD'; // Default for truly neutral
   
-  // Only trade if side strength meets minimum threshold
-  if(sideStrength >= MIN_SIDE_STRENGTH){
+  // Moderate signal → PENDING (directional bias, wait for confirmation)
+  if(sideStrength >= PENDING_THRESHOLD && sideStrength < STRONG_THRESHOLD){
+    recommendation = aggSide > 0 ? 'PENDING LONG' : 'PENDING SHORT';
+  }
+  // Strong signal → BUY/SELL (enter now)
+  else if(sideStrength >= STRONG_THRESHOLD){
     recommendation = aggSide > 0 ? 'BUY' : 'SELL';
   }
   
@@ -15947,26 +15953,28 @@ function computeModuleDecision(baseArr, view){
   // checklist proxy: prefer more confirmations when targeting live trades
   const checks = reasons.length;
   const mode = (RISK_MODE||'Balanced').toLowerCase();
-  const minProb = mode==='aggressive' ? 78 : (mode==='safe' ? 88 : 82); // Raised thresholds
-  const strongProb = mode==='aggressive' ? 88 : (mode==='safe' ? 94 : 92); // Raised thresholds
-  const minChecks = mode==='aggressive' ? 5 : (mode==='safe' ? 7 : 6); // Raised from 4/6/5
+  const minProb = mode==='aggressive' ? 78 : (mode==='safe' ? 88 : 82);
+  const strongProb = mode==='aggressive' ? 88 : (mode==='safe' ? 94 : 92);
+  const minChecks = mode==='aggressive' ? 5 : (mode==='safe' ? 7 : 6);
   
-  // Only upgrade to STRONG if both probability AND checks are very high
-  if(recommendation !== 'HOLD' && probability>=minProb && aggSide!==0 && checks>=minChecks){ 
-    recommendation = aggSide>0 ? 'BUY' : 'SELL'; 
-  } else if(recommendation !== 'HOLD' && (probability < minProb || checks < minChecks)){
-    // Signal exists but not strong enough - downgrade to HOLD
-    recommendation = 'HOLD';
+  // BUY/SELL requires high probability AND minimum checks
+  if(['BUY', 'SELL'].includes(recommendation)){
+    if(probability < minProb || checks < minChecks){
+      // Downgrade to PENDING if not enough confirmation
+      recommendation = recommendation === 'BUY' ? 'PENDING LONG' : 'PENDING SHORT';
+      reasons.push(`⚠️ Downgraded to PENDING: Need ${minChecks} checks (have ${checks}) and ${minProb}% prob (have ${probability}%)`);
+    }
   }
   
-  // very strong signal - requires BOTH high probability AND extra checks
-  if(recommendation !== 'HOLD' && probability>=strongProb && aggSide!==0 && checks>=(minChecks+2)){ // Changed +1 to +2
+  // STRONG BUY/SELL requires BOTH very high probability AND extra checks
+  if(['BUY', 'SELL'].includes(recommendation) && probability>=strongProb && aggSide!==0 && checks>=(minChecks+2)){
     recommendation = (aggSide>0?'STRONG BUY':'STRONG SELL');
   }
   
   // CRITICAL SAFETY CHECK: Don't BUY at resistance or SELL at support
-  // This prevents the 83% loss rate from buying tops and selling bottoms
-  if(recommendation !== 'HOLD'){
+  // For PENDING orders, this is fine - they'll wait for better entry
+  // Only filter immediate BUY/SELL orders
+  if(['BUY', 'SELL', 'STRONG BUY', 'STRONG SELL'].includes(recommendation)){
     try{
       const structure = computeStructure(d);
       const swing = structure.lastSwing;
@@ -15974,17 +15982,17 @@ function computeModuleDecision(baseArr, view){
         const swingRange = swing.high - swing.low;
         const currentLevel = (last.c - swing.low) / swingRange; // 0 = bottom, 1 = top
         
-        // In PREMIUM zone (70%+ of range) - DON'T BUY, only SELL
-        // In DISCOUNT zone (30%- of range) - DON'T SELL, only BUY
+        // In PREMIUM zone (70%+ of range) - DON'T BUY NOW, make it PENDING
+        // In DISCOUNT zone (30%- of range) - DON'T SELL NOW, make it PENDING
         if(recommendation.includes('BUY') && currentLevel > 0.65){
-          reasons.push('⚠️ FILTERED: BUY signal rejected - price in PREMIUM zone (top 35% of range)');
-          recommendation = 'HOLD';
-          probability = Math.max(40, probability - 15); // Penalty
+          reasons.push(`⚠️ Price in PREMIUM zone (${(currentLevel*100).toFixed(0)}%) - Entry at better level`);
+          recommendation = 'PENDING LONG'; // Wait for pullback
+          probability = Math.max(50, probability - 10);
         }
         if(recommendation.includes('SELL') && currentLevel < 0.35){
-          reasons.push('⚠️ FILTERED: SELL signal rejected - price in DISCOUNT zone (bottom 35% of range)');
-          recommendation = 'HOLD';
-          probability = Math.max(40, probability - 15); // Penalty
+          reasons.push(`⚠️ Price in DISCOUNT zone (${(currentLevel*100).toFixed(0)}%) - Entry at better level`);
+          recommendation = 'PENDING SHORT'; // Wait for bounce
+          probability = Math.max(50, probability - 10);
         }
       }
     }catch(e){
