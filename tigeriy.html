@@ -20963,25 +20963,14 @@ async function runAnalysis(){
   const s = (String(out.recommendation||'').toUpperCase().includes('SELL') ? -1 : (String(out.recommendation||'').toUpperCase().includes('BUY') ? 1 : 0));
   if(s!==0){ STATE.lastSignal = { side: s, t: base[base.length-1]?.t || Date.now() }; }
   
-  // CRITICAL FIX: Force update of indicator values display (user reported showing "-")
+  // ICT Score display logging (user reported showing "-")
   try{
-    if(indEl && last){
-      indEl.innerHTML = `Price: ${Number.isFinite(last.c)?last.c.toFixed(6):'N/A'}<br/>RSI: ${Number.isFinite(last.rsi)?last.rsi.toFixed(2):'N/A'}<br/>SMA20: ${Number.isFinite(last.sma20)?last.sma20.toFixed(6):'N/A'}<br/>SMA50: ${Number.isFinite(last.sma50)?last.sma50.toFixed(6):'N/A'}<br/>SMA200: ${Number.isFinite(last.sma200)?last.sma200.toFixed(6):'N/A'}`;
-    }
-    if(macdEl && last){
-      macdEl.innerHTML = `MACD hist: ${Number.isFinite(last.macd_hist)?last.macd_hist.toFixed(6):'N/A'}`;
-    }
-    if(volEl && last){
-      volEl.innerHTML = `ATR14: ${Number.isFinite(last.atr)?last.atr.toFixed(6):'N/A'} • VWAP: ${Number.isFinite(last.vwap)?last.vwap.toFixed(6):'N/A'}`;
-    }
-    
-    // ICT Score display (user reported showing "-")
     const ict = STATE._lastICTAnalysis;
     if(ict && ict.score !== undefined){
       console.log(`[DISPLAY FIX] ICT Score: ${ict.score}% | Confidence: ${ict.confidence}% | Direction: ${ict.direction}`);
     }
   }catch(e){
-    console.error('[DISPLAY FIX] Error updating indicators:', e);
+    console.error('[DISPLAY FIX] Error logging ICT:', e);
   }
 }
 
