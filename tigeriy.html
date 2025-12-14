@@ -20608,9 +20608,7 @@ async function runAnalysis(){
         const last = (STATE.history && STATE.history.length > 0) ? STATE.history[STATE.history.length - 1] : null;
         if(!last || !last.c){
           ictLines.push(`<span style="color:orange;">⚠️ No current price data for zones</span>`);
-        } else {
-          tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
-        } else {
+        }
         
         // Define currentPrice for use throughout ICT display section
         const currentPrice = last.c;
@@ -20845,7 +20843,7 @@ async function runAnalysis(){
       // ALWAYS append ICT lines (whether loading, error, or complete)
       const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
       tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
-      
+      }
     }catch(e){ 
       console.error('[ICT Display] Error rendering ICT analysis:', e); 
       // Show error in UI
@@ -20858,10 +20856,12 @@ async function runAnalysis(){
     
     // Also surface a compact plan line inside Reasons per user request
     try{
-      const fmt = (v)=> Number.isFinite(v)? v.toFixed(6) : 'N/A';
-      const brief = `Plan — SL ${fmt(plan.sl)} (1R) • TP1 ${fmt(plan.tp1)} (1R) • TP2 ${fmt(plan.tp2)} (1.5R) • TP3 ${fmt(plan.tp3)} (2R)`;
-      out.reasons = (out.reasons||[]).concat([brief]);
-      setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
+      if(plan){
+        const fmt = (v)=> Number.isFinite(v)? v.toFixed(6) : 'N/A';
+        const brief = `Plan — SL ${fmt(plan.sl)} (1R) • TP1 ${fmt(plan.tp1)} (1R) • TP2 ${fmt(plan.tp2)} (1.5R) • TP3 ${fmt(plan.tp3)} (2R)`;
+        out.reasons = (out.reasons||[]).concat([brief]);
+        setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
+      }
     }catch{}
   } else { setText(tradePlanEl, 'Trade plan: N/A'); }
   // Trade viability vs horizon expected move
