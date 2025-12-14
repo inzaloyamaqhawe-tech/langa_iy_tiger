@@ -8078,48 +8078,86 @@ function computeTradePlan(d, side){
   let hm = null; try{ hm = computeHorizonMetrics(d, STATE.interval, null, null); }catch{}
   const expMove = (hm && Number.isFinite(hm.expectedMove)) ? hm.expectedMove : null;
 
-  // PENDING LONG/SHORT: Generate conditional entry ranges based on structure
+  // PENDING LONG/SHORT: Generate conditional entry ranges based on RECENT structure
+  // If structure is too far away, upgrade to immediate BUY/SELL
   if(side === 'PENDING LONG' || side === 'PENDING SHORT'){
-    const structure = computeStructure(d);
-    const swing = structure.lastSwing || {high: entry + (atr * 10), low: entry - (atr * 10)};
     const direction = side === 'PENDING LONG' ? 'LONG' : 'SHORT';
+    const structure = computeStructure(d);
     
-    // Define breakout level and entry range
+    // Find RECENT swing high/low within reasonable distance (max 3-5 ATR away)
+    const maxDistance = atr * 4; // Max 4 ATR away to be considered "recent"
+    
+    // Get recent highs/lows from last 20 candles only
+    const recentBars = d.slice(-20);
+    const recentHighs = recentBars.map(b => b.h);
+    const recentLows = recentBars.map(b => b.l);
+    const recentHigh = Math.max(...recentHighs);
+    const recentLow = Math.min(...recentLows);
+    
     let breakLevel, entryLow, entryHigh;
+    let tooFar = false;
+    
     if(direction === 'LONG'){
-      breakLevel = swing.low; // Support to break above
-      entryLow = breakLevel + (atr * 0.5);   // Start entry 0.5 ATR above break
-      entryHigh = breakLevel + (atr * 1.5);  // End entry 1.5 ATR above break
+      // For LONG: Look for recent support (swing low)
+      // If current price is already way above recent low, don't wait - enter now
+      const distanceFromLow = entry - recentLow;
+      
+      if(distanceFromLow > maxDistance){
+        // Price too far above support - this is immediate entry, not pending
+        tooFar = true;
+      } else {
+        // Recent support exists - set pending entry above it
+        breakLevel = recentLow;
+        entryLow = Math.max(breakLevel + (atr * 0.3), entry - (atr * 0.5));  // Near current price
+        entryHigh = Math.max(breakLevel + (atr * 1.0), entry + (atr * 0.5)); // Slightly above
+      }
     } else {
-      breakLevel = swing.high; // Resistance to break below
-      entryHigh = breakLevel - (atr * 0.5);  // Start entry 0.5 ATR below break
-      entryLow = breakLevel - (atr * 1.5);   // End entry 1.5 ATR below break
+      // For SHORT: Look for recent resistance (swing high)
+      const distanceFromHigh = recentHigh - entry;
+      
+      if(distanceFromHigh > maxDistance){
+        // Price too far below resistance - this is immediate entry, not pending
+        tooFar = true;
+      } else {
+        // Recent resistance exists - set pending entry below it
+        breakLevel = recentHigh;
+        entryHigh = Math.min(breakLevel - (atr * 0.3), entry + (atr * 0.5)); // Near current price
+        entryLow = Math.min(breakLevel - (atr * 1.0), entry - (atr * 0.5));  // Slightly below
+      }
     }
     
-    const entryMid = (entryHigh + entryLow) / 2;
-    const slDistance = atr * atrMultSL;
-    sl = direction === 'LONG' ? entryMid - slDistance : entryMid + slDistance;
-    
-    const risk = Math.abs(entryMid - sl);
-    if(risk > 0){
-      tp1 = direction === 'LONG' ? entryMid + (risk * tp1R) : entryMid - (risk * tp1R);
-      tp2 = direction === 'LONG' ? entryMid + (risk * tp2R) : entryMid - (risk * tp2R);
-      tp3 = direction === 'LONG' ? entryMid + (risk * tp3R) : entryMid - (risk * tp3R);
+    // If structure is too far, upgrade to immediate BUY/SELL
+    if(tooFar){
+      // Recalculate as immediate entry (fall through to BUY/SELL logic below)
+      side = direction === 'LONG' ? 'BUY' : 'SELL';
+      // Continue to normal BUY/SELL calculation
+    } else {
+      // Valid pending setup - calculate SL/TP from entry range
+      const entryMid = (entryHigh + entryLow) / 2;
+      const slDistance = atr * atrMultSL;
+      sl = direction === 'LONG' ? entryMid - slDistance : entryMid + slDistance;
+      
+      const risk = Math.abs(entryMid - sl);
+      if(risk > 0){
+        tp1 = direction === 'LONG' ? entryMid + (risk * tp1R) : entryMid - (risk * tp1R);
+        tp2 = direction === 'LONG' ? entryMid + (risk * tp2R) : entryMid - (risk * tp2R);
+        tp3 = direction === 'LONG' ? entryMid + (risk * tp3R) : entryMid - (risk * tp3R);
+      }
+      
+      // Return with entry range
+      const fmt = (v)=> Number.isFinite(v) ? v.toFixed(6) : 'N/A';
+      return { 
+        entry: `${fmt(entryLow)} to ${fmt(entryHigh)}`, 
+        entryMid: Number(entryMid.toFixed(6)),
+        sl: Number(sl.toFixed(6)), 
+        tp1: Number(tp1.toFixed(6)), 
+        tp2: Number(tp2.toFixed(6)), 
+        tp3: Number(tp3.toFixed(6)),
+        breakLevel: Number(breakLevel.toFixed(6)),
+        pending: true,
+        text: `PENDING ${direction}: Entry ${fmt(entryLow)}-${fmt(entryHigh)} (near ${fmt(breakLevel)}) \u2022 SL ${fmt(sl)} (1R) \u2022 TP1 ${fmt(tp1)} (1R) \u2022 TP2 ${fmt(tp2)} (1.5R) \u2022 TP3 ${fmt(tp3)} (2R)` 
+      };
     }
-    
-    // Return with entry range
-    const fmt = (v)=> Number.isFinite(v) ? v.toFixed(6) : 'N/A';
-    return { 
-      entry: `${fmt(entryLow)} to ${fmt(entryHigh)}`, 
-      entryMid: Number(entryMid.toFixed(6)),
-      sl: Number(sl.toFixed(6)), 
-      tp1: Number(tp1.toFixed(6)), 
-      tp2: Number(tp2.toFixed(6)), 
-      tp3: Number(tp3.toFixed(6)),
-      breakLevel: Number(breakLevel.toFixed(6)),
-      pending: true,
-      text: `PENDING ${direction}: Entry ${fmt(entryLow)}-${fmt(entryHigh)} (break ${fmt(breakLevel)}) \u2022 SL ${fmt(sl)} (1R) \u2022 TP1 ${fmt(tp1)} (1R) \u2022 TP2 ${fmt(tp2)} (1.5R) \u2022 TP3 ${fmt(tp3)} (2R)` 
-    };
   }
 
   if(side === 'BUY' || side === 'STRONG BUY'){
