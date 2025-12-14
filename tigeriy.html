@@ -16118,6 +16118,43 @@ function computeModuleDecision(baseArr, view){
   }catch(e){
     console.warn('[Edge Integration]', e);
   }
+  
+  // 11) ICT/SMC 12-Point Analysis (USER DEMAND: "ALL METRICS MUST CONTRIBUTE TO DECISION")
+  // Previously computed but NOT integrated - now adds weight to recommendation
+  try{
+    const ictData = STATE._lastICTAnalysis;
+    if(ictData && ictData.score != null){
+      const ictWeight = 0.25; // Strong influence but not dominant
+      const ictScore = ictData.score; // 0-100%
+      const ictDir = ictData.direction; // 'BULLISH', 'BEARISH', 'NEUTRAL'
+      const ictConfidence = ictData.confidence || 0; // 0-100%
+      
+      // High ICT score (>70%) with direction bias should influence decision
+      if(ictScore >= 70 && ictDir === 'BULLISH'){
+        side += ictWeight * 1;
+        conf += ictConfidence * 0.3; // Add ICT confidence
+        reasons.push(`🎯 ICT: ${ictScore}% ${ictDir}`);
+      } else if(ictScore >= 70 && ictDir === 'BEARISH'){
+        side += ictWeight * -1;
+        conf += ictConfidence * 0.3;
+        reasons.push(`🎯 ICT: ${ictScore}% ${ictDir}`);
+      } else if(ictScore >= 50 && ictScore < 70){
+        // Moderate ICT score - add smaller bias
+        const dirBias = ictDir === 'BULLISH' ? 1 : (ictDir === 'BEARISH' ? -1 : 0);
+        side += ictWeight * 0.5 * dirBias;
+        conf += ictConfidence * 0.15;
+        reasons.push(`ICT: ${ictScore}% ${ictDir}`);
+      }
+      
+      // CRITICAL: If ICT says DON'T TRADE (score < 50%), reduce confidence
+      if(ictScore < 50){
+        conf = Math.max(40, conf * 0.85); // Reduce confidence by 15%
+        reasons.push(`⚠️ ICT LOW: ${ictScore}%`);
+      }
+    }
+  }catch(e){
+    console.warn('[ICT Integration]', e);
+  }
 
   // Decision synthesis: STRICT FILTERING - Only trade when signal is STRONG
   // USER CORRECTION: Weak signals should be PENDING (not HOLD)
@@ -16158,8 +16195,11 @@ function computeModuleDecision(baseArr, view){
   if(['BUY', 'SELL'].includes(recommendation)){
     if(probability < minProbForImmediate){
       // Downgrade to PENDING if confidence < 60%
+      const oldRec = recommendation;
       recommendation = recommendation === 'BUY' ? 'PENDING LONG' : 'PENDING SHORT';
       reasons.push(`⚠️ Confidence ${probability}% < 60% - Using PENDING setup instead of immediate entry`);
+      console.warn(`[CONFIDENCE DOWNGRADE] ${oldRec} → ${recommendation} due to ${probability}% confidence < 60%`);
+      console.warn(`[CONFIDENCE DOWNGRADE] ${oldRec} → ${recommendation} due to ${probability}% confidence < 60%`);
     }
   }
   
@@ -20185,7 +20225,7 @@ async function runAnalysis(){
           // If price is already at entry AND confidence >= 60%, upgrade to immediate entry
           if(priceAtEntry && probability >= 60){
             const newRec = isPendingLong ? 'BUY' : 'SELL';
-            console.warn(`[PENDING FIX] Price ${currentPrice.toFixed(2)} is ALREADY at entry (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) with ${probability}% confidence - Upgrading PENDING to ${newRec}`);
+            console.warn(`[PENDING UPGRADE] Price ${currentPrice.toFixed(2)} is ALREADY at entry (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) with ${probability}% confidence - Upgrading PENDING to ${newRec}`);
             
             // CRITICAL: Update the actual recommendation variable (not just display)
             out.recommendation = newRec;
@@ -20213,6 +20253,36 @@ async function runAnalysis(){
             
             // Skip the PENDING direction warning below
             return;
+          }
+          
+          // CRITICAL FIX: Handle DOWNGRADE case (BUY → PENDING LONG when confidence drops)
+          // This happens when initial signal is strong but later checks reduce confidence
+          else if(!priceAtEntry && probability < 60 && ['BUY', 'SELL'].includes(out.recommendation)){
+            const oldRec = out.recommendation;
+            const newRec = out.recommendation === 'BUY' ? 'PENDING LONG' : 'PENDING SHORT';
+            console.warn(`[PENDING DOWNGRADE] ${oldRec} → ${newRec} because price NOT at entry (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) and confidence ${probability}% < 60%`);
+            
+            // Update recommendation variable
+            out.recommendation = newRec;
+            
+            // Update reasons
+            if(out.reasons && Array.isArray(out.reasons)){
+              out.reasons = out.reasons.filter(r => !/executing immediately/i.test(r));
+              out.reasons.push(`⚠️ Confidence ${probability}% < 60% - Using PENDING setup`);
+            }
+            
+            // Update display
+            if(recEl){
+              setText(recEl, `Recommendation: ${newRec}`);
+            }
+            if(reasonsEl && out.reasons){
+              setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
+            }
+            
+            // Add downgrade warning to trade plan
+            const downgradeWarning = `<br/><br/><strong style="color:#f59e0b;font-size:1.15em;">⚠️ DOWNGRADED TO ${newRec}</strong><br/>Confidence ${probability}% is below 60% threshold OR price not at entry yet.<br/>Wait for price to reach entry zone (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) before entering.`;
+            const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
+            tradePlanEl.innerHTML = currentText + downgradeWarning;
           }
         }
       }
