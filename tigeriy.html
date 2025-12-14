@@ -20895,6 +20895,7 @@ async function runAnalysis(){
       // ALWAYS append ICT lines (whether loading, error, or complete)
       const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
       tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
+      } // Close else block for if(!ict)
     }catch(e){ 
       console.error('[ICT Display] Error rendering ICT analysis:', e); 
       // Show error in UI
