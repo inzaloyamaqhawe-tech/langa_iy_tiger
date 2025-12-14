@@ -8078,6 +8078,50 @@ function computeTradePlan(d, side){
   let hm = null; try{ hm = computeHorizonMetrics(d, STATE.interval, null, null); }catch{}
   const expMove = (hm && Number.isFinite(hm.expectedMove)) ? hm.expectedMove : null;
 
+  // PENDING LONG/SHORT: Generate conditional entry ranges based on structure
+  if(side === 'PENDING LONG' || side === 'PENDING SHORT'){
+    const structure = computeStructure(d);
+    const swing = structure.lastSwing || {high: entry + (atr * 10), low: entry - (atr * 10)};
+    const direction = side === 'PENDING LONG' ? 'LONG' : 'SHORT';
+    
+    // Define breakout level and entry range
+    let breakLevel, entryLow, entryHigh;
+    if(direction === 'LONG'){
+      breakLevel = swing.low; // Support to break above
+      entryLow = breakLevel + (atr * 0.5);   // Start entry 0.5 ATR above break
+      entryHigh = breakLevel + (atr * 1.5);  // End entry 1.5 ATR above break
+    } else {
+      breakLevel = swing.high; // Resistance to break below
+      entryHigh = breakLevel - (atr * 0.5);  // Start entry 0.5 ATR below break
+      entryLow = breakLevel - (atr * 1.5);   // End entry 1.5 ATR below break
+    }
+    
+    const entryMid = (entryHigh + entryLow) / 2;
+    const slDistance = atr * atrMultSL;
+    sl = direction === 'LONG' ? entryMid - slDistance : entryMid + slDistance;
+    
+    const risk = Math.abs(entryMid - sl);
+    if(risk > 0){
+      tp1 = direction === 'LONG' ? entryMid + (risk * tp1R) : entryMid - (risk * tp1R);
+      tp2 = direction === 'LONG' ? entryMid + (risk * tp2R) : entryMid - (risk * tp2R);
+      tp3 = direction === 'LONG' ? entryMid + (risk * tp3R) : entryMid - (risk * tp3R);
+    }
+    
+    // Return with entry range
+    const fmt = (v)=> Number.isFinite(v) ? v.toFixed(6) : 'N/A';
+    return { 
+      entry: `${fmt(entryLow)} to ${fmt(entryHigh)}`, 
+      entryMid: Number(entryMid.toFixed(6)),
+      sl: Number(sl.toFixed(6)), 
+      tp1: Number(tp1.toFixed(6)), 
+      tp2: Number(tp2.toFixed(6)), 
+      tp3: Number(tp3.toFixed(6)),
+      breakLevel: Number(breakLevel.toFixed(6)),
+      pending: true,
+      text: `PENDING ${direction}: Entry ${fmt(entryLow)}-${fmt(entryHigh)} (break ${fmt(breakLevel)}) \u2022 SL ${fmt(sl)} (1R) \u2022 TP1 ${fmt(tp1)} (1R) \u2022 TP2 ${fmt(tp2)} (1.5R) \u2022 TP3 ${fmt(tp3)} (2R)` 
+    };
+  }
+
   if(side === 'BUY' || side === 'STRONG BUY'){
     // Base SL: below recentLow OR atr-based cushion
     const swingSL = Number.isFinite(recentLow) ? recentLow - liqBuffer : null;
