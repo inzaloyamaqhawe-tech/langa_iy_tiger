@@ -20200,24 +20200,25 @@ async function runAnalysis(){
     // ========== ICT/SMC 12-POINT COMPREHENSIVE ANALYSIS ==========
     try{
       const ict = STATE._lastICTAnalysis;
+      const ictLines = [];
+      ictLines.push(`<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━`);
+      
       if(!ict){
-        console.warn('[ICT Display] No ICT analysis available yet - will show when ready');
-        // Don't return - show placeholder
-        const ictLines = [];
-        ictLines.push(`<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━`);
+        console.warn('[ICT Display] No ICT analysis available yet - showing placeholder');
         ictLines.push(`<strong style="color:orange;">⏳ LOADING...</strong>`);
-        ictLines.push(`Analysis in progress. Refresh in 2-3 seconds.`);
-        const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
-        tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
+        ictLines.push(`Analysis in progress. Will update when ready.`);
       } else {
+        // Display ICT Score prominently
+        const scoreColor = ict.score >= 70 ? 'green' : (ict.score >= 50 ? 'orange' : 'red');
+        ictLines.push(`<strong style="color:${scoreColor};font-size:1.2em;">ICT Score: ${ict.score}% | Confidence: ${ict.confidence}%</strong>`);
+        ictLines.push(`<strong>Direction: ${ict.direction || 'NEUTRAL'} | Setup: ${ict.setupType || 'N/A'}</strong>`);
+        ictLines.push(`<strong>Trade Decision: ${ict.goTrade ? '✅ GO TRADE' : '❌ NO TRADE'}</strong>`);
+        
         // Get last candle for current price
         const last = (STATE.history && STATE.history.length > 0) ? STATE.history[STATE.history.length - 1] : null;
         if(!last || !last.c){
-          console.warn('[ICT Display] No valid price data');
-          const ictLines = [];
-          ictLines.push(`<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━`);
-          ictLines.push(`<strong style="color:red;">❌ NO PRICE DATA</strong>`);
-          const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
+          ictLines.push(`<span style="color:orange;">⚠️ No current price data for zones</span>`);
+        } else {
           tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
         } else {
         
@@ -20449,12 +20450,21 @@ async function runAnalysis(){
                            riskRating.includes('MEDIUM') ? '#f59e0b' : '#10b981';
           ictLines.push(`<br/><strong>Risk Rating:</strong> <span style="color:${riskColor};">${riskRating}</span>`);
         }
-        
+      } // End of: if(last && last.c) block
+      
+      // ALWAYS append ICT lines (whether loading, error, or complete)
+      const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
+      tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
+      
+    }catch(e){ 
+      console.error('[ICT Display] Error rendering ICT analysis:', e); 
+      // Show error in UI
+      try{
+        const errorMsg = `<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━<br/><strong style="color:red;">❌ Error: ${e.message}</strong>`;
         const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
-        tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
-        }
-      }
-    }catch(e){ console.warn('[ICT Display]', e); }
+        tradePlanEl.innerHTML = currentText + errorMsg;
+      }catch{}
+    }
     
     // Also surface a compact plan line inside Reasons per user request
     try{
@@ -20504,6 +20514,27 @@ async function runAnalysis(){
   // Persist last actionable signal for cooldown
   const s = (String(out.recommendation||'').toUpperCase().includes('SELL') ? -1 : (String(out.recommendation||'').toUpperCase().includes('BUY') ? 1 : 0));
   if(s!==0){ STATE.lastSignal = { side: s, t: base[base.length-1]?.t || Date.now() }; }
+  
+  // CRITICAL FIX: Force update of indicator values display (user reported showing "-")
+  try{
+    if(indEl && last){
+      indEl.innerHTML = `Price: ${Number.isFinite(last.c)?last.c.toFixed(6):'N/A'}<br/>RSI: ${Number.isFinite(last.rsi)?last.rsi.toFixed(2):'N/A'}<br/>SMA20: ${Number.isFinite(last.sma20)?last.sma20.toFixed(6):'N/A'}<br/>SMA50: ${Number.isFinite(last.sma50)?last.sma50.toFixed(6):'N/A'}<br/>SMA200: ${Number.isFinite(last.sma200)?last.sma200.toFixed(6):'N/A'}`;
+    }
+    if(macdEl && last){
+      macdEl.innerHTML = `MACD hist: ${Number.isFinite(last.macd_hist)?last.macd_hist.toFixed(6):'N/A'}`;
+    }
+    if(volEl && last){
+      volEl.innerHTML = `ATR14: ${Number.isFinite(last.atr)?last.atr.toFixed(6):'N/A'} • VWAP: ${Number.isFinite(last.vwap)?last.vwap.toFixed(6):'N/A'}`;
+    }
+    
+    // ICT Score display (user reported showing "-")
+    const ict = STATE._lastICTAnalysis;
+    if(ict && ict.score !== undefined){
+      console.log(`[DISPLAY FIX] ICT Score: ${ict.score}% | Confidence: ${ict.confidence}% | Direction: ${ict.direction}`);
+    }
+  }catch(e){
+    console.error('[DISPLAY FIX] Error updating indicators:', e);
+  }
 }
 
 /* Update schedule by interval: faster for smaller frames */
@@ -20615,10 +20646,11 @@ async function onSymbolChange(){
   setText(reasonsEl, 'Reasons: gathering data');
   setText(sourceEl, 'Source: —');
   
-  // Clear all display panels when switching assets
+  // Clear trade plan but PRESERVE strategy panel (user complained about content disappearing)
   if(tradePlanEl) tradePlanEl.innerHTML = '';
   const strategyPanelEl = document.getElementById('strategyPanel');
-  if(strategyPanelEl) strategyPanelEl.innerHTML = '';
+  // DON'T clear strategy panel - it should accumulate detailed analysis, not alternate
+  // if(strategyPanelEl) strategyPanelEl.innerHTML = '';
 
   // Fetch display and analysis histories in parallel to reduce wait time (performance improvement Oct 2025)
   let displayPromise, analysisPromise;
