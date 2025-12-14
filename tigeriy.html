@@ -2420,12 +2420,28 @@ async function fetchRSSViaAllOrigins(url){
     const txt = await res.text();
     const dom = new DOMParser().parseFromString(txt, 'text/xml');
     const items = [...dom.querySelectorAll('item')].slice(0, 12);
-    return items.map(it=>({
-      title: (it.querySelector('title')?.textContent||'').trim(),
-      url: (it.querySelector('link')?.textContent||'').trim(),
-      t: Date.parse(it.querySelector('pubDate')?.textContent||'') || Date.now(),
-      kind:'news'
-    })).filter(x=>x.title && x.url);
+    return items.map(it=>{
+      // Parse description field - often contains summary or event details with TIMES
+      const descNode = it.querySelector('description') || it.querySelector('summary') || it.querySelector('content:encoded');
+      let description = '';
+      if(descNode){
+        const rawDesc = descNode.textContent || '';
+        // Strip HTML tags if present (some feeds include HTML in description)
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = rawDesc;
+        description = (tempDiv.textContent || tempDiv.innerText || '').trim();
+        // Limit to first 500 chars to avoid huge payloads
+        if(description.length > 500) description = description.substring(0, 500) + '...';
+      }
+      
+      return {
+        title: (it.querySelector('title')?.textContent||'').trim(),
+        url: (it.querySelector('link')?.textContent||'').trim(),
+        t: Date.parse(it.querySelector('pubDate')?.textContent||'') || Date.now(),
+        summary: description, // NEW: Add description/summary field with event times
+        kind:'news'
+      };
+    }).filter(x=>x.title && x.url);
   }catch(e){ return []; }
 }
 async function fetchHeadlines(symbol){
@@ -20128,9 +20144,16 @@ async function runAnalysis(){
           if(priceAtEntry && probability >= 60){
             const newRec = isPendingLong ? 'BUY' : 'SELL';
             console.warn(`[PENDING FIX] Price ${currentPrice.toFixed(2)} is ALREADY at entry (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) with ${probability}% confidence - Upgrading PENDING to ${newRec}`);
+            
+            // CRITICAL: Update the actual recommendation variable (not just display)
             out.recommendation = newRec;
             
-            // Update the UI text to show upgrade
+            // Update the main recommendation display at top of page
+            if(recEl){
+              setText(recEl, `Recommendation: ${newRec}`);
+            }
+            
+            // Update the trade plan UI text to show upgrade
             const upgradeWarning = `<br/><br/><strong style="color:#10b981;font-size:1.15em;">✅ UPGRADED TO ${newRec}</strong><br/>Price ${currentPrice.toFixed(2)} is ALREADY at entry zone (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) with ${probability}% confidence.<br/><strong style="color:#10b981;">🚀 ENTER NOW - No need to wait!</strong>`;
             const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
             tradePlanEl.innerHTML = currentText + upgradeWarning;
