@@ -16088,22 +16088,32 @@ function computeModuleDecision(baseArr, view){
   // checklist proxy: prefer more confirmations when targeting live trades
   const checks = reasons.length;
   const mode = (RISK_MODE||'Balanced').toLowerCase();
-  const minProb = mode==='aggressive' ? 78 : (mode==='safe' ? 88 : 82);
-  const strongProb = mode==='aggressive' ? 88 : (mode==='safe' ? 94 : 92);
-  const minChecks = mode==='aggressive' ? 5 : (mode==='safe' ? 7 : 6);
   
-  // BUY/SELL requires high probability AND minimum checks
+  // CONFIDENCE-BASED DECISION (User Demand: 60%+ = BUY/SELL NOW, not PENDING)
+  // 60%+ = Clear signal, trade NOW
+  // 40-60% = Moderate signal, wait for PENDING setup
+  // <40% = Weak signal, HOLD
+  const minProbForImmediate = 60;  // USER REQUIREMENT: 60%+ = BUY/SELL NOW
+  const minProbForPending = 40;     // 40-60% = PENDING
+  
+  // If signal is strong (≥30% side strength) BUT confidence too low, downgrade to PENDING
   if(['BUY', 'SELL'].includes(recommendation)){
-    if(probability < minProb || checks < minChecks){
-      // Downgrade to PENDING if not enough confirmation
+    if(probability < minProbForImmediate){
+      // Downgrade to PENDING if confidence < 60%
       recommendation = recommendation === 'BUY' ? 'PENDING LONG' : 'PENDING SHORT';
-      reasons.push(`⚠️ Downgraded to PENDING: Need ${minChecks} checks (have ${checks}) and ${minProb}% prob (have ${probability}%)`);
+      reasons.push(`⚠️ Confidence ${probability}% < 60% - Using PENDING setup instead of immediate entry`);
     }
   }
   
-  // STRONG BUY/SELL requires BOTH very high probability AND extra checks
-  if(['BUY', 'SELL'].includes(recommendation) && probability>=strongProb && aggSide!==0 && checks>=(minChecks+2)){
-    recommendation = (aggSide>0?'STRONG BUY':'STRONG SELL');
+  // If PENDING but confidence is actually high (≥60%), upgrade to immediate BUY/SELL
+  if(['PENDING LONG', 'PENDING SHORT'].includes(recommendation) && probability >= minProbForImmediate){
+    recommendation = recommendation === 'PENDING LONG' ? 'BUY' : 'SELL';
+    reasons.push(`✅ Confidence ${probability}% ≥ 60% - Upgraded to immediate entry`);
+  }
+  
+  // STRONG BUY/SELL for very high confidence (≥80%)
+  if(['BUY', 'SELL'].includes(recommendation) && probability >= 80 && aggSide !== 0){
+    recommendation = (aggSide > 0 ? 'STRONG BUY' : 'STRONG SELL');
   }
   
   // CRITICAL SAFETY CHECK: Don't BUY at resistance or SELL at support
@@ -16117,17 +16127,27 @@ function computeModuleDecision(baseArr, view){
         const swingRange = swing.high - swing.low;
         const currentLevel = (last.c - swing.low) / swingRange; // 0 = bottom, 1 = top
         
-        // In PREMIUM zone (70%+ of range) - DON'T BUY NOW, make it PENDING
-        // In DISCOUNT zone (30%- of range) - DON'T SELL NOW, make it PENDING
-        if(recommendation.includes('BUY') && currentLevel > 0.65){
-          reasons.push(`⚠️ Price in PREMIUM zone (${(currentLevel*100).toFixed(0)}%) - Entry at better level`);
-          recommendation = 'PENDING LONG'; // Wait for pullback
-          probability = Math.max(50, probability - 10);
+        // In PREMIUM zone (70%+ of range) - DON'T BUY NOW unless confidence is very high (75%+)
+        // In DISCOUNT zone (30%- of range) - DON'T SELL NOW unless confidence is very high (75%+)
+        if(recommendation.includes('BUY') && currentLevel > 0.70){
+          // Only downgrade if confidence is not extremely high
+          if(probability < 75){
+            reasons.push(`⚠️ Price in PREMIUM zone (${(currentLevel*100).toFixed(0)}%) + confidence ${probability}% < 75% - Waiting for pullback`);
+            recommendation = 'PENDING LONG'; // Wait for pullback
+            probability = Math.max(50, probability - 10);
+          } else {
+            reasons.push(`⚠️ Price in PREMIUM zone (${(currentLevel*100).toFixed(0)}%) BUT confidence ${probability}% ≥ 75% - Taking immediate entry`);
+          }
         }
-        if(recommendation.includes('SELL') && currentLevel < 0.35){
-          reasons.push(`⚠️ Price in DISCOUNT zone (${(currentLevel*100).toFixed(0)}%) - Entry at better level`);
-          recommendation = 'PENDING SHORT'; // Wait for bounce
-          probability = Math.max(50, probability - 10);
+        if(recommendation.includes('SELL') && currentLevel < 0.30){
+          // Only downgrade if confidence is not extremely high
+          if(probability < 75){
+            reasons.push(`⚠️ Price in DISCOUNT zone (${(currentLevel*100).toFixed(0)}%) + confidence ${probability}% < 75% - Waiting for bounce`);
+            recommendation = 'PENDING SHORT'; // Wait for bounce
+            probability = Math.max(50, probability - 10);
+          } else {
+            reasons.push(`⚠️ Price in DISCOUNT zone (${(currentLevel*100).toFixed(0)}%) BUT confidence ${probability}% ≥ 75% - Taking immediate entry`);
+          }
         }
       }
     }catch(e){
