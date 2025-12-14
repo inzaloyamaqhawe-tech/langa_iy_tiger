@@ -19212,7 +19212,7 @@ async function runAnalysis(){
         const vwapOK = (l.vwap ? (side>0 ? l.c>l.vwap : l.c<l.vwap) : false);
         const adxOK = (l.adx||0) >= 20;
         if(stOK) agrees.push('ST'); if(macdOK) agrees.push('MACD'); if(smaOK) agrees.push('SMA50'); if(vwapOK) agrees.push('VWAP'); if(adxOK) agrees.push('ADX');
-        if(agrees.length>=3 && ['BUY','STRONG BUY','SELL','STRONG SELL'].includes(String(out.recommendation).toUpperCase())){
+        if(agrees.length>=3 && ['BUY','STRONG BUY','SELL','STRONG SELL','PENDING LONG','PENDING SHORT'].includes(String(out.recommendation).toUpperCase())){
           out.probability = Math.min(99, Math.max(out.probability, 80 + (agrees.length-3)*5));
           out.reasons = (out.reasons||[]).concat([`Consensus: ${agrees.join('+')}`]);
         }
@@ -19225,7 +19225,7 @@ async function runAnalysis(){
     try{
       const rc = robustConsensusDecision();
       if(rc && rc.side!==0){
-        const outIsActionable = ['BUY','STRONG BUY','SELL','STRONG SELL'].includes(String(out.recommendation||'').toUpperCase());
+        const outIsActionable = ['BUY','STRONG BUY','SELL','STRONG SELL','PENDING LONG','PENDING SHORT'].includes(String(out.recommendation||'').toUpperCase());
         if(!outIsActionable || rc.probability > (out.probability||0)){
           out.recommendation = rc.recommendation;
           out.probability = rc.probability;
@@ -19286,7 +19286,7 @@ async function runAnalysis(){
         }
       }
       // Small directional confirmation: if upcoming positives and your signal is long (or negatives for shorts), nudge +2
-      if((upcoming.up>0 || upcoming.down>0) && ['BUY','STRONG BUY','SELL','STRONG SELL'].includes(String(out.recommendation||'').toUpperCase())){
+      if((upcoming.up>0 || upcoming.down>0) && ['BUY','STRONG BUY','SELL','STRONG SELL','PENDING LONG','PENDING SHORT'].includes(String(out.recommendation||'').toUpperCase())){
         const sideNum = out.recommendation.toUpperCase().includes('SELL') ? -1 : 1;
         if(sideNum>0 && upcoming.up>upcoming.down) out.probability = Math.min(96, (out.probability||80)+2);
         if(sideNum<0 && upcoming.down>upcoming.up) out.probability = Math.min(96, (out.probability||80)+2);
