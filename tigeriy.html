@@ -20105,6 +20105,43 @@ async function runAnalysis(){
       setText(tradePlanEl, `Trade plan: ${plan.text}`);
     }
     
+    // ========== CRITICAL FIX: Check if price is ALREADY at PENDING entry ==========
+    // If PENDING shows entry range AND current price is already inside that range AND confidence >= 60%
+    // Then upgrade to immediate BUY/SELL (user caught this bug on first trade!)
+    if(out.recommendation && (out.recommendation.includes('PENDING LONG') || out.recommendation.includes('PENDING SHORT'))){
+      const isPendingLong = out.recommendation.includes('PENDING LONG');
+      const last = STATE.history && STATE.history.length > 0 ? STATE.history[STATE.history.length - 1] : null;
+      const currentPrice = last ? last.c : null;
+      const probability = out.probability || 0;
+      
+      // Check if price is already within entry range
+      if(plan && plan.pending && currentPrice && Number.isFinite(plan.entryMid)){
+        const entryStr = plan.entry || '';
+        const match = entryStr.match(/(\d+\.?\d*)\s+to\s+(\d+\.?\d*)/);
+        
+        if(match){
+          const entryLow = parseFloat(match[1]);
+          const entryHigh = parseFloat(match[2]);
+          const priceAtEntry = currentPrice >= entryLow && currentPrice <= entryHigh;
+          
+          // If price is already at entry AND confidence >= 60%, upgrade to immediate entry
+          if(priceAtEntry && probability >= 60){
+            const newRec = isPendingLong ? 'BUY' : 'SELL';
+            console.warn(`[PENDING FIX] Price ${currentPrice.toFixed(2)} is ALREADY at entry (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) with ${probability}% confidence - Upgrading PENDING to ${newRec}`);
+            out.recommendation = newRec;
+            
+            // Update the UI text to show upgrade
+            const upgradeWarning = `<br/><br/><strong style="color:#10b981;font-size:1.15em;">✅ UPGRADED TO ${newRec}</strong><br/>Price ${currentPrice.toFixed(2)} is ALREADY at entry zone (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) with ${probability}% confidence.<br/><strong style="color:#10b981;">🚀 ENTER NOW - No need to wait!</strong>`;
+            const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
+            tradePlanEl.innerHTML = currentText + upgradeWarning;
+            
+            // Skip the PENDING direction warning below
+            return;
+          }
+        }
+      }
+    }
+    
     // ========== PENDING SIGNAL DIRECTION CLARIFICATION ==========
     if(out.recommendation && (out.recommendation.includes('PENDING LONG') || out.recommendation.includes('PENDING SHORT'))){
       const isPendingLong = out.recommendation.includes('PENDING LONG');
