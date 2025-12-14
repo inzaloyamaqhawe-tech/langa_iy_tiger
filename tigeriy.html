@@ -14440,18 +14440,63 @@ function computeStructure(d){
     });
   }
   
-  // Build lines connecting swing points
+// Build lines connecting swing points - CORRECTLY
+  // UPTREND: Connect HH to HH (higher highs line) and HL to HL (higher lows line)
+  // DOWNTREND: Connect LH to LH (lower highs line) and LL to LL (lower lows line)
+  // NEVER connect HH to HL or LL to LH (causes X crossing lines)
   const lines = [];
-  for(let i = 1; i < significantSwings.length; i++){
-    const prev = significantSwings[i - 1];
-    const curr = significantSwings[i];
-    
+  
+  // Separate swings by type
+  const hhSwings = significantSwings.filter(s => s.label === 'HH');
+  const hlSwings = significantSwings.filter(s => s.label === 'HL');
+  const lhSwings = significantSwings.filter(s => s.label === 'LH');
+  const llSwings = significantSwings.filter(s => s.label === 'LL');
+  
+  // Connect HH to HH (higher highs trendline)
+  for(let i = 1; i < hhSwings.length; i++){
     lines.push({
-      x1: prev.time,
-      y1: prev.price,
-      x2: curr.time,
-      y2: curr.price,
-      label: curr.label
+      x1: hhSwings[i - 1].time,
+      y1: hhSwings[i - 1].price,
+      x2: hhSwings[i].time,
+      y2: hhSwings[i].price,
+      label: 'HH',
+      color: '#10b981' // Green for higher highs
+    });
+  }
+  
+  // Connect HL to HL (higher lows trendline)
+  for(let i = 1; i < hlSwings.length; i++){
+    lines.push({
+      x1: hlSwings[i - 1].time,
+      y1: hlSwings[i - 1].price,
+      x2: hlSwings[i].time,
+      y2: hlSwings[i].price,
+      label: 'HL',
+      color: '#10b981' // Green for higher lows
+    });
+  }
+  
+  // Connect LH to LH (lower highs trendline)
+  for(let i = 1; i < lhSwings.length; i++){
+    lines.push({
+      x1: lhSwings[i - 1].time,
+      y1: lhSwings[i - 1].price,
+      x2: lhSwings[i].time,
+      y2: lhSwings[i].price,
+      label: 'LH',
+      color: '#ef4444' // Red for lower highs
+    });
+  }
+  
+  // Connect LL to LL (lower lows trendline)
+  for(let i = 1; i < llSwings.length; i++){
+    lines.push({
+      x1: llSwings[i - 1].time,
+      y1: llSwings[i - 1].price,
+      x2: llSwings[i].time,
+      y2: llSwings[i].price,
+      label: 'LL',
+      color: '#ef4444' // Red for lower lows
     });
   }
   
