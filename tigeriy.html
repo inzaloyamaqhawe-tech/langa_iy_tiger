@@ -8043,25 +8043,28 @@ function computeTradePlan(d, side){
   const entry = last.c;
   // Timeframe-specific SL/TP sizing per rulebook
   const view = STATE.interval;
+  // ADJUSTED: Tighter SL multipliers to avoid constant sweeps (user: 83% loss rate due to SL hits)
+  // Reduced from 1.0 ATR to 0.7-0.8 ATR for most timeframes
   const sizing = (()=>{
     switch(view){
-      case '1m':  return { sl:1.0, p:1.08, r:1.19 };
-      case '5m':  return { sl:1.0, p:1.12, r:1.4 };
-      case '15m': return { sl:1.0, p:1.15, r:1.3 };
-      case '30m': return { sl:1.0, p:1.8, r:2.2 };
-      case '1h':  return { sl:1.0, p:1.3, r:1.65 };
-      case '4h':  return { sl:1.0, p:2.5, r:4.0 };
-      case '1d':  return { sl:1.0, p:3.0, r:6.0 };
-      case '1w':  return { sl:1.0, p:4.0, r:8.0 };
-      case '1M':  return { sl:1.0, p:5.0, r:10.0 };
-      default:    return { sl:1.0, p:1.5, r:2.0 };
+      case '1m':  return { sl:0.7, p:1.08, r:1.19 };  // Tighter for scalping
+      case '5m':  return { sl:0.75, p:1.12, r:1.4 };  // Reduced from 1.0
+      case '15m': return { sl:0.8, p:1.15, r:1.3 };   // Reduced from 1.0
+      case '30m': return { sl:0.85, p:1.8, r:2.2 };   // Reduced from 1.0
+      case '1h':  return { sl:0.9, p:1.3, r:1.65 };   // Reduced from 1.0
+      case '4h':  return { sl:1.0, p:2.5, r:4.0 };    // Keep for swing
+      case '1d':  return { sl:1.0, p:3.0, r:6.0 };    // Keep for position
+      case '1w':  return { sl:1.0, p:4.0, r:8.0 };    // Keep for long-term
+      case '1M':  return { sl:1.0, p:5.0, r:10.0 };   // Keep for long-term
+      default:    return { sl:0.8, p:1.5, r:2.0 };    // Default tighter
     }
   })();
   const atrMultSL = sizing.sl;
-  // Enforce user-requested R ratios for targets: TP1 = 2R, TP2 = 3R
-  const primaryR = 2;
-  const runnerR  = 3;
-  let sl=null, tp1=null, tp2=null;
+  // USER REQUESTED R RATIOS: TP1 = 1R, TP2 = 1.5R, TP3 = 2R (exactly 1:1 risk/reward for TP1)
+  const tp1R = 1.0;   // 1R - Same distance as SL (1:1 risk/reward)
+  const tp2R = 1.5;   // 1.5R
+  const tp3R = 2.0;   // 2R
+  let sl=null, tp1=null, tp2=null, tp3=null;
   const liqBuffer = atr ? atr*0.15 : 0; // smaller buffer
   // Pre-calc horizon expected move for clamp
   let hm = null; try{ hm = computeHorizonMetrics(d, STATE.interval, null, null); }catch{}
@@ -8078,12 +8081,14 @@ function computeTradePlan(d, side){
     sl = baseSL;
     const risk = (Number.isFinite(sl)? (entry - sl) : (atr? atr*atrMultSL : null));
     if(Number.isFinite(risk) && risk>0){
-      tp1 = entry + risk*primaryR;
-      tp2 = entry + risk*runnerR;
+      tp1 = entry + risk*tp1R;  // 1R - exactly same distance as SL
+      tp2 = entry + risk*tp2R;  // 1.5R
+      tp3 = entry + risk*tp3R;  // 2R
     } else {
       // fallback using ATR if risk unknown
-      tp1 = atr? entry + atr*primaryR*atrMultSL : (recentHigh || null);
-      tp2 = atr? entry + atr*runnerR*atrMultSL : (recentHigh ? recentHigh*1.003 : null);
+      tp1 = atr? entry + atr*tp1R*atrMultSL : (recentHigh || null);
+      tp2 = atr? entry + atr*tp2R*atrMultSL : (recentHigh ? recentHigh*1.002 : null);
+      tp3 = atr? entry + atr*tp3R*atrMultSL : (recentHigh ? recentHigh*1.003 : null);
     }
     // Measured move target from recent double/triple bottom if confirmed
     try{
@@ -8106,11 +8111,13 @@ function computeTradePlan(d, side){
     sl = baseSL;
     const risk = (Number.isFinite(sl)? (sl - entry) : (atr? atr*atrMultSL : null));
     if(Number.isFinite(risk) && risk>0){
-      tp1 = entry - risk*primaryR;
-      tp2 = entry - risk*runnerR;
+      tp1 = entry - risk*tp1R;  // 1R - exactly same distance as SL
+      tp2 = entry - risk*tp2R;  // 1.5R
+      tp3 = entry - risk*tp3R;  // 2R
     } else {
-      tp1 = atr? entry - atr*primaryR*atrMultSL : (recentLow || null);
-      tp2 = atr? entry - atr*runnerR*atrMultSL : (recentLow ? recentLow*0.997 : null);
+      tp1 = atr? entry - atr*tp1R*atrMultSL : (recentLow || null);
+      tp2 = atr? entry - atr*tp2R*atrMultSL : (recentLow ? recentLow*0.998 : null);
+      tp3 = atr? entry - atr*tp3R*atrMultSL : (recentLow ? recentLow*0.997 : null);
     }
     // Measured move from double/triple top if confirmed
     try{
@@ -8138,32 +8145,49 @@ function computeTradePlan(d, side){
       const maxRunner = clampDist * (TIMEBOX_MODE?1.4:1.6);
       if(dist2 > maxRunner) tp2 = entry + Math.sign(tp2-entry)*maxRunner;
     }
-  }
-
-  // Enforce runner caps (intraday <= 2R; daily/weekly allow higher but we pre-sized)
-  if(Number.isFinite(sl) && Number.isFinite(entry) && Number.isFinite(tp2)){
-    const risk = Math.abs(entry - sl);
-    if(risk>0){
-      const r2 = Math.abs(tp2 - entry)/risk;
-      const rCap = (view==='1d'||view==='1w'||view==='1M') ? 8 : 2;
-      if(r2 > rCap) tp2 = entry + Math.sign(tp2-entry)*risk*rCap;
+    if(Number.isFinite(tp3)){
+      const dist3 = Math.abs(tp3 - entry);
+      const maxRunner3 = clampDist * (TIMEBOX_MODE?1.6:2.0);
+      if(dist3 > maxRunner3) tp3 = entry + Math.sign(tp3-entry)*maxRunner3;
     }
   }
-  // Ensure tp2 >= tp1 distance wise in direction
+
+  // Enforce runner caps (intraday <= 2R for TP3; daily/weekly allow higher)
+  if(Number.isFinite(sl) && Number.isFinite(entry)){
+    const risk = Math.abs(entry - sl);
+    if(risk>0){
+      // Cap TP2 at 1.5R minimum, TP3 at 2R for intraday
+      if(Number.isFinite(tp2)){
+        const r2 = Math.abs(tp2 - entry)/risk;
+        const r2Cap = (view==='1d'||view==='1w'||view==='1M') ? 4 : 1.5;
+        if(r2 > r2Cap) tp2 = entry + Math.sign(tp2-entry)*risk*r2Cap;
+      }
+      if(Number.isFinite(tp3)){
+        const r3 = Math.abs(tp3 - entry)/risk;
+        const r3Cap = (view==='1d'||view==='1w'||view==='1M') ? 8 : 2;
+        if(r3 > r3Cap) tp3 = entry + Math.sign(tp3-entry)*risk*r3Cap;
+      }
+    }
+  }
+  // Ensure tp2 >= tp1 and tp3 >= tp2 distance wise in direction
   if(Number.isFinite(tp1) && Number.isFinite(tp2)){
     if((tp2>entry && tp2<tp1) || (tp2<entry && tp2>tp1)) tp2 = tp1; // collapse if inverted
+  }
+  if(Number.isFinite(tp2) && Number.isFinite(tp3)){
+    if((tp3>entry && tp3<tp2) || (tp3<entry && tp3>tp2)) tp3 = tp2; // collapse if inverted
   }
 
   const fmt = (v)=> Number.isFinite(v) ? v.toFixed(6) : 'N/A';
   // Provide R multiples for UI consumption
-  let r1=null, r2=null; if(Number.isFinite(sl) && Number.isFinite(entry)){
+  let r1=null, r2=null, r3=null; if(Number.isFinite(sl) && Number.isFinite(entry)){
     const risk = Math.abs(entry - sl);
     if(risk>0){
       if(Number.isFinite(tp1)) r1 = Math.abs(tp1 - entry)/risk;
       if(Number.isFinite(tp2)) r2 = Math.abs(tp2 - entry)/risk;
+      if(Number.isFinite(tp3)) r3 = Math.abs(tp3 - entry)/risk;
     }
   }
-  return { entry, sl, tp1, tp2, r1, r2, text: `Entry ${fmt(entry)} • SL ${fmt(sl)} • TP1 ${fmt(tp1)} • TP2 ${fmt(tp2)}${r1?` • R1 ${r1.toFixed(2)}R`:''}${r2?` • R2 ${r2.toFixed(2)}R`:''}` };
+  return { entry, sl, tp1, tp2, tp3, r1, r2, r3, text: `Entry ${fmt(entry)} • SL ${fmt(sl)} (1R) • TP1 ${fmt(tp1)} (1R) • TP2 ${fmt(tp2)} (1.5R) • TP3 ${fmt(tp3)} (2R)` };
 }
 
 // Advanced order flow & microstructure analysis (institutional-grade)
@@ -20145,7 +20169,7 @@ async function runAnalysis(){
     // Also surface a compact plan line inside Reasons per user request
     try{
       const fmt = (v)=> Number.isFinite(v)? v.toFixed(6) : 'N/A';
-      const brief = `Plan — SL ${fmt(plan.sl)} • TP1 ${fmt(plan.tp1)} • TP2 ${fmt(plan.tp2)}`;
+      const brief = `Plan — SL ${fmt(plan.sl)} (1R) • TP1 ${fmt(plan.tp1)} (1R) • TP2 ${fmt(plan.tp2)} (1.5R) • TP3 ${fmt(plan.tp3)} (2R)`;
       out.reasons = (out.reasons||[]).concat([brief]);
       setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
     }catch{}
