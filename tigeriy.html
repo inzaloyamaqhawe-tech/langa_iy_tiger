@@ -19932,8 +19932,12 @@ async function runAnalysis(){
             strategyLines.push(`\n<em>${symbol} is in ${ps.context}, aligned with trend structure.</em>`);
           }
           
-          // Pending setup details
-          strategyLines.push(`\n<strong>Pending ${decisionTree.decision.includes('LONG') ? 'Long' : 'Short'} Setup</strong>`);
+          // Pending setup details WITH CLEAR DIRECTION INDICATOR
+          const isLong = decisionTree.decision.includes('LONG');
+          const directionArrow = isLong ? '📈 ⬆️' : '📉 ⬇️';
+          const directionText = isLong ? 'EXPECT PRICE TO GO UP' : 'EXPECT PRICE TO GO DOWN';
+          strategyLines.push(`\n<strong style="font-size:1.1em;">${directionArrow} Pending ${isLong ? 'Long' : 'Short'} Setup - ${directionText} AFTER ENTRY</strong>`);
+          strategyLines.push(`<span style="color:${isLong ? '#10b981' : '#ef4444'};font-weight:bold;">⚠️ ${isLong ? 'BULLISH' : 'BEARISH'} BIAS - Wait for pullback to entry, then price moves ${isLong ? 'UP' : 'DOWN'}</span>`);
           strategyLines.push(`- Asset: ${symbol} (${interval} execution)`);
           strategyLines.push(`- Entry (limit ${decisionTree.decision.includes('LONG') ? 'buy' : 'sell'}): ${ps.entry}`);
           strategyLines.push(`- Stop Loss: ${ps.stop}`);
@@ -20079,6 +20083,17 @@ async function runAnalysis(){
       setText(tradePlanEl, `Trade plan: ${plan.text}${sizeNote}`);
     }catch{
       setText(tradePlanEl, `Trade plan: ${plan.text}`);
+    }
+    
+    // ========== PENDING SIGNAL DIRECTION CLARIFICATION ==========
+    if(out.recommendation && (out.recommendation.includes('PENDING LONG') || out.recommendation.includes('PENDING SHORT'))){
+      const isPendingLong = out.recommendation.includes('PENDING LONG');
+      const directionWarning = isPendingLong 
+        ? `<br/><br/><strong style="color:#10b981;font-size:1.15em;">📈 ⬆️ PENDING LONG = BULLISH BIAS</strong><br/>This means: <strong>EXPECT PRICE TO GO UP</strong> after it reaches the entry zone.<br/>❌ Do NOT sell! Wait for price to pull back to entry ${plan.entryLow || 'zone'}, THEN it should move UP to targets.`
+        : `<br/><br/><strong style="color:#ef4444;font-size:1.15em;">📉 ⬇️ PENDING SHORT = BEARISH BIAS</strong><br/>This means: <strong>EXPECT PRICE TO GO DOWN</strong> after it reaches the entry zone.<br/>❌ Do NOT buy! Wait for price to bounce to entry ${plan.entryHigh || 'zone'}, THEN it should move DOWN to targets.`;
+      
+      const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
+      tradePlanEl.innerHTML = currentText + directionWarning;
     }
     
     // ========== SMART RISK-REWARD CALCULATOR ==========
