@@ -20820,12 +20820,12 @@ async function runAnalysis(){
           
           if(nearestSupport || nearestResistance){
             ictLines.push(`<br/><strong>📍 CURRENT POSITION:</strong>`);
-            if(nearestResistance){
+            if(nearestResistance && Number.isFinite(nearestResistance.priceMid)){
               const dist = ((nearestResistance.priceMid - currentPrice) / currentPrice * 100).toFixed(2);
               ictLines.push(`  ⬆️ Next Resistance: ${nearestResistance.priceMid.toFixed(6)} (+${dist}%)`);
             }
             ictLines.push(`  🔵 Current: ${currentPrice.toFixed(6)}`);
-            if(nearestSupport){
+            if(nearestSupport && Number.isFinite(nearestSupport.priceMid)){
               const dist = ((currentPrice - nearestSupport.priceMid) / currentPrice * 100).toFixed(2);
               ictLines.push(`  ⬇️ Next Support: ${nearestSupport.priceMid.toFixed(6)} (-${dist}%)`);
             }
