@@ -20915,7 +20915,13 @@ async function runAnalysis(){
         setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
       }
     }catch{}
-  } else { setText(tradePlanEl, 'Trade plan: N/A'); }
+  } // Close if(plan) outer block at line 20482
+  
+  // If no plan, show N/A
+  if(!plan){
+    setText(tradePlanEl, 'Trade plan: N/A');
+  }
+  
   // Trade viability vs horizon expected move
   try{
     const hm = computeHorizonMetrics(base, STATE.interval, uiLinks, STATE.symbol);
