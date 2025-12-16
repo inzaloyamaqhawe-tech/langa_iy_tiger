@@ -19572,13 +19572,22 @@ async function runAnalysis(){
   
   const base = (STATE.analysisHistory && STATE.analysisHistory.length) ? STATE.analysisHistory : STATE.history;
   try{ if(base && base.length) evaluatePastSignals(base); }catch{}
-  // Reduced minimum: only need 20 bars minimum (was 50+)
-  const needMin = Math.max(20, Math.min(30, getRecommendedWindowSize(STATE.interval, Array.isArray(base)? base.length : 0) / 2));
+  
+  // ========== BLUEPRINT FIX: TIMEFRAME-ADAPTIVE MINIMUM BARS ==========
+  // For higher timeframes (1d/1w/1M), waiting 30 bars = months/years
+  // We analyze FVGs and patterns from history, not waiting for future data
+  let needMin = 10; // Default for 1h and below
+  if(STATE.interval === '1d' || STATE.interval === '1D' || STATE.interval === '1w' || STATE.interval === '1W' || STATE.interval === '1M'){
+    needMin = 3; // Only 3 bars needed for daily+ (can analyze recent history)
+  } else if(STATE.interval === '4h' || STATE.interval === '4H'){
+    needMin = 5;
+  }
+  
   if(!base || base.length < needMin){
     const have = Array.isArray(base)? base.length : 0;
     setText(recEl, 'Recommendation: HOLD');
     setText(probEl, 'Probability: 50%');
-    setText(reasonsEl, `Reasons: Waiting for at least ${needMin} bars on ${STATE.interval} (have ${have}). Loading...`);
+    setText(reasonsEl, `Reasons: Loading chart data (${have}/${needMin} bars on ${STATE.interval})...`);
     setText(sourceEl, 'Source: SYSTEM');
     return;
   }
@@ -20509,14 +20518,14 @@ async function runAnalysis(){
       console.warn('[BLUEPRINT] Structure vs News conflict - dual plans generated');
     }
     
-    // Final safety net (Point 72)
+    // Final safety net (Point 72) - ADVISORY mode: downgrade confidence instead of blocking
     const safetyCheck = finalSafetyNet(out, base, forecast, STATE.confirmationFlag, adrFeasibility, preEventWindow, dontChase);
     if(!safetyCheck.safe && !preEventWindow.inWindow){
-      // Force WAIT with clear explanation
-      out.recommendation = 'WAIT';
-      out.probability = 50.000;
-      out.reasons = [`🛡️ SAFETY NET TRIGGERED:`, ...safetyCheck.failures, safetyCheck.action];
-      console.warn('[BLUEPRINT] Safety net triggered:', safetyCheck.failures.join('; '));
+      // ADVISORY: Downgrade confidence and add warnings (don't force WAIT)
+      const failureCount = safetyCheck.failures ? safetyCheck.failures.length : 0;
+      out.probability = Math.max(50.000, out.probability - (failureCount * 10)); // -10% per failure
+      out.reasons = (out.reasons || []).concat([`⚠️ GUARDRAILS (${failureCount} warnings):`, ...safetyCheck.failures]);
+      console.warn('[BLUEPRINT] Safety warnings:', safetyCheck.failures.join('; '));
     }
     
     // Store all safety data in output
@@ -20547,6 +20556,24 @@ async function runAnalysis(){
   setText(recEl, `Recommendation: ${out.recommendation}`);
   setText(probEl, `Probability: ${formatProbability(out.probability || 0)}%`);
   
+  // ========== NEWS DISPLAY (RESTORE PROMINENCE) ==========
+  let newsText = '';
+  if(fundamentals && fundamentals.newsBias !== undefined){
+    newsText = `\n\n━━━━ 📰 NEWS & FUNDAMENTALS ━━━━\n`;
+    const biasDir = fundamentals.newsBias > 0 ? 'BULLISH' : (fundamentals.newsBias < 0 ? 'BEARISH' : 'NEUTRAL');
+    const biasStrength = fundamentals.newsBias !== 0 ? `(${fundamentals.newsBias > 0 ? '+' : ''}${fundamentals.newsBias.toFixed(2)})` : '';
+    newsText += `Bias: ${biasDir} ${biasStrength}\n`;
+    newsText += `Score: ${fundamentals.newsScore}/100\n`;
+    newsText += `Confidence: ${fundamentals.newsConfidence}%\n`;
+    if(fundamentals.newsEvents && fundamentals.newsEvents.length > 0){
+      newsText += `Events: ${fundamentals.newsEvents.join(', ')}\n`;
+    }
+    newsText += `Risk Level: ${fundamentals.newsRisk}\n`;
+    if(fundamentals.eventWindow && fundamentals.eventWindow.disable){
+      newsText += `⚠️ Event Window: ${fundamentals.eventWindow.reason}\n`;
+    }
+  }
+  
   // ========== BLUEPRINT FORECAST DISPLAY (Point 59, 70) ==========
   // Communication discipline: aligned statements with forecast + recommendation + strategy + trade plan
   if(out.forecast){
@@ -20554,7 +20581,8 @@ async function runAnalysis(){
     const conf = out.confidenceCategory;
     const plan = out.pendingPlan;
     
-    let forecastText = `\n\n━━━━ 🎯 NEXT INTERVAL FORECAST ━━━━\n`;
+    let forecastText = newsText; // Start with news section
+    forecastText += `\n\n━━━━ 🎯 NEXT INTERVAL FORECAST ━━━━\n`;
     forecastText += `Direction: ${f.direction}\n`;
     forecastText += `Probability: ${formatProbability(f.probability)}%\n`;
     forecastText += `Expected Move: ${formatPercent(f.expectedMove)}%\n`;
