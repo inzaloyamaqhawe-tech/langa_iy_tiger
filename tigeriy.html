@@ -707,7 +707,7 @@ const CRYPTOPANIC_KEY = "af584d31325e2760592af46dc637d887d437eb8d"; // optional 
 let STRICT_ALIGN = false;
 // Safety controls
 let COUNTERTREND_FILTER = true;       // block signals against strong HTF bias
-let SIGNAL_COOLDOWN_MIN = 15;         // minutes before allowing opposite signal
+let SIGNAL_COOLDOWN_MIN = 30;         // minutes before allowing opposite signal (stability)
 let BAR_CLOSE_ONLY = true;            // prefer last closed candle for ALL timeframes when enabled
 let RISK_MODE = 'Balanced';           // Safe | Balanced | Aggressive
 let PRO_MODE = true;                  // tighter pro-level gating and confluence rules
@@ -2164,19 +2164,23 @@ async function applyConservativeGates(out, d, interval){
     }catch{}
 
     // Cooldown: avoid rapid flip to opposite within N minutes (longer on higher TF)
+    // STABILITY: Block opposite signals entirely during cooldown, don't just cap probability
     try{
       const now = Date.now();
       const recU = String(out.recommendation||'').toUpperCase();
-      const actionable = ['BUY','STRONG BUY','SELL','STRONG SELL'].includes(recU);
-      const side = recU.includes('SELL') ? -1 : (recU.includes('BUY') ? 1 : 0);
+      const actionable = ['BUY','STRONG BUY','SELL','STRONG SELL','PENDING LONG','PENDING SHORT'].includes(recU);
+      const side = recU.includes('SELL') || recU.includes('SHORT') ? -1 : (recU.includes('BUY') || recU.includes('LONG') ? 1 : 0);
       if(actionable && side!==0 && STATE.lastSignal && typeof STATE.lastSignal.side==='number' && typeof STATE.lastSignal.t==='number'){
         const mins = (now - STATE.lastSignal.t) / 60000;
         let cdMin = SIGNAL_COOLDOWN_MIN;
         if(['1h','2h','4h','6h','8h','12h'].includes(interval)) cdMin = Math.max(cdMin, 30);
         if(['1d','3d','1w','1M'].includes(interval)) cdMin = Math.max(cdMin, 60);
         if(STATE.lastSignal.side !== side && mins < cdMin){
-          out.probability = Math.min(out.probability, 82);
-          out.reasons = (out.reasons||[]).concat([`Cooldown active (${Math.max(0, cdMin - Math.floor(mins))}m left)`]);
+          // BLOCK opposite signal entirely - force HOLD during cooldown
+          const timeLeft = Math.max(0, cdMin - Math.floor(mins));
+          out.recommendation = 'HOLD';
+          out.probability = 65;
+          out.reasons = [`⏱️ SIGNAL STABILITY: Last signal was ${STATE.lastSignal.side > 0 ? 'BUY' : 'SELL'} ${Math.floor(mins)}m ago. Cooldown active (${timeLeft}m remaining). Not flipping to opposite direction yet - waiting for confirmation.`];
         }
       }
     }catch{}
