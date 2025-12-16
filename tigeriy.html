@@ -8833,10 +8833,39 @@ function getCentralBankRates(){
 function checkUpcomingMacroEvents(headlines){
   const out = { hasImminent: false, events: [], riskLevel: 'LOW' };
   try{
-    if(!Array.isArray(headlines)) return out;
-    
     const now = Date.now();
     const next48h = now + (48 * 60 * 60 * 1000);
+    
+    // REAL ECONOMIC CALENDAR (hardcoded major events)
+    const calendar = [
+      { date: '2025-12-16', time: '13:30', event: 'US CPI (Inflation)', impact: 'HIGH' },
+      { date: '2025-12-18', time: '19:00', event: 'FOMC Interest Rate Decision', impact: 'EXTREME' },
+      { date: '2025-12-18', time: '19:30', event: 'Fed Chair Powell Press Conference', impact: 'EXTREME' },
+      { date: '2025-12-20', time: '12:00', event: 'US GDP (Final)', impact: 'HIGH' },
+      { date: '2026-01-10', time: '13:30', event: 'US Nonfarm Payrolls (NFP)', impact: 'EXTREME' },
+      { date: '2026-01-15', time: '13:30', event: 'US CPI (Inflation)', impact: 'HIGH' },
+      { date: '2026-01-29', time: '19:00', event: 'FOMC Interest Rate Decision', impact: 'EXTREME' }
+    ];
+    
+    // Check calendar events
+    calendar.forEach(cal => {
+      const eventTime = new Date(`${cal.date}T${cal.time}:00Z`).getTime();
+      const hoursUntil = (eventTime - now) / (60 * 60 * 1000);
+      
+      if(hoursUntil > 0 && hoursUntil <= 48){
+        out.hasImminent = true;
+        out.events.push({
+          title: `${cal.event} (in ${Math.round(hoursUntil)}h)`,
+          time: eventTime,
+          impact: cal.impact
+        });
+        if(cal.impact === 'EXTREME') out.riskLevel = 'EXTREME';
+        else if(cal.impact === 'HIGH' && out.riskLevel !== 'EXTREME') out.riskLevel = 'HIGH';
+      }
+    });
+    
+    // Also check news headlines
+    if(!Array.isArray(headlines)) return out;
     
     // High-impact keywords
     const highImpact = [
@@ -18762,9 +18791,21 @@ function unifiedConsensus(ictScore, newsBias, aiRecommendation, technicalBias, p
   } else if (votes.SELL > votes.BUY) {
     votes.SELL += votes.NEUTRAL;
   } else {
-    // Perfect tie - split NEUTRAL votes, favor BUY on exact tie
-    votes.BUY += Math.ceil(votes.NEUTRAL / 2);
-    votes.SELL += Math.floor(votes.NEUTRAL / 2);
+    // Perfect tie - split NEUTRAL votes equally (no bias)
+    const halfNeutral = Math.floor(votes.NEUTRAL / 2);
+    votes.BUY += halfNeutral;
+    votes.SELL += halfNeutral;
+    // If odd number of NEUTRAL votes, give last vote to current market direction
+    if(votes.NEUTRAL % 2 === 1){
+      // Check current price vs SMA50 to determine market direction
+      const lastBar = STATE.history?.[STATE.history.length - 1];
+      if(lastBar && lastBar.c && lastBar.sma50){
+        if(lastBar.c > lastBar.sma50) votes.BUY++; else votes.SELL++;
+      } else {
+        // No market data - truly random split
+        if(Math.random() > 0.5) votes.BUY++; else votes.SELL++;
+      }
+    }
   }
   
   const total = votes.BUY + votes.SELL; // NEUTRAL already distributed
@@ -20923,12 +20964,8 @@ async function runAnalysis(){
       } // Close else block for if(!ict)
     }catch(e){ 
       console.error('[ICT Display] Error rendering ICT analysis:', e); 
-      // Show error in UI
-      try{
-        const errorMsg = `<br/><br/>━━━━ 🎯 ICT/SMC 12-POINT ANALYSIS ━━━━<br/><strong style="color:red;">❌ Error: ${e.message}</strong>`;
-        const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
-        tradePlanEl.innerHTML = currentText + errorMsg;
-      }catch{}
+      console.error('[ICT Display] Stack:', e.stack);
+      // Error logged to console only - no frontend display
     }
     
     // Also surface a compact plan line inside Reasons per user request
