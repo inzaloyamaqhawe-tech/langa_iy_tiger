@@ -20479,14 +20479,22 @@ async function runAnalysis(){
       }
     }
     
-    // Don't chase rule (Point 62)
+    // Don't chase rule (Point 62) - STRICT: Force WAIT when ADR exhausted (>100%)
     const dontChase = checkDontChaseRule(base, adrData, forecast);
     if(dontChase.chasing){
-      // Downgrade to pending only
-      if(['BUY', 'STRONG BUY', 'SELL', 'STRONG SELL'].includes(out.recommendation)){
-        out.recommendation = recDir > 0 ? 'PENDING LONG' : 'PENDING SHORT';
-        out.probability = Math.min(out.probability, 70.000);
-        out.reasons = (out.reasons||[]).concat([`⚠️ DON'T CHASE: ${dontChase.reason}`]);
+      // If ADR consumed >100%, NO SETUP - Force WAIT
+      if(adrData && adrData.consumedPct > 100){
+        out.recommendation = 'WAIT';
+        out.probability = 50.000;
+        out.reasons = [`🛑 ADR EXHAUSTED: ${dontChase.reason}`, 'No room for targets. Wait for deep pullback or reversal setup.'];
+        console.warn('[BLUEPRINT] ADR exhausted >100% - no trade setup available');
+      } else {
+        // Downgrade to pending only (70-100% consumed)
+        if(['BUY', 'STRONG BUY', 'SELL', 'STRONG SELL'].includes(out.recommendation)){
+          out.recommendation = recDir > 0 ? 'PENDING LONG' : 'PENDING SHORT';
+          out.probability = Math.min(out.probability, 70.000);
+          out.reasons = (out.reasons||[]).concat([`⚠️ DON'T CHASE: ${dontChase.reason}`]);
+        }
       }
     }
     
