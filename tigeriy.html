@@ -17537,9 +17537,19 @@ function drawChart(updateOnly=false){
         const st = computeStructure(d); const choch = detectCHoCH(d);
         if(st && (st.bos||0)!==0){ anns.structLab = { type:'label', xValue:last.t, yValue:last.h, content:[ (st.bos>0?'BOS↑':'BOS↓') + (choch?'/CHoCH':'') ], backgroundColor:'rgba(31,41,55,0.8)', color:'#e5e7eb', padding:4, position:{x:'end', y:'start'} };
         }
+        
+        // ========== BLUEPRINT FIX: Reduce clutter on lower timeframes ==========
+        // 1h and below: Show only KEY swings (every 3rd or 4th)
+        // 4h and above: Show all swings (already clean)
+        const isLowerTF = ['15s','1m','5m','15m','30m','1h'].includes(STATE.interval);
+        const skipInterval = isLowerTF ? 3 : 1; // Show every 3rd label on lower TFs
+        
         // Draw swing structure lines and labels (HH, HL, LH, LL)
         if(st && st.swings && st.swings.length>=2){
           for(let i=1;i<st.swings.length;i++){
+            // On lower TFs, only show KEY swings to reduce clutter
+            if(isLowerTF && i % skipInterval !== 0) continue;
+            
             const a=st.swings[i-1], b=st.swings[i];
             anns['swline'+i] = { type:'line', xMin:a.x, xMax:b.x, yMin:a.y, yMax:b.y, borderColor:'#fbbf24', borderWidth:2, borderDash:[4,2] };
             anns['swlab'+i] = { type:'label', xValue:b.x, yValue:b.y, content:[b.label], backgroundColor:'rgba(251,191,36,0.7)', color:'#1e293b', padding:2 };
@@ -21488,10 +21498,17 @@ async function runAnalysis(){
         strategyLines.push(`Use 25-50% size with tight stops (0.5-1× ATR).`);
       }
       
-      strategyPanelEl.innerHTML = strategyLines.join('<br/>');
+      // ========== BLUEPRINT FIX: Preserve content, don't let it disappear ==========
+      // Store the content so it persists across chart redraws
+      STATE._lastStrategyPanel = strategyLines.join('<br/>');
+      strategyPanelEl.innerHTML = STATE._lastStrategyPanel;
     }
   }catch(e){
     console.warn('⚠️ Strategy panel error:', e);
+    // If error occurs, restore last good content (prevent blank screen)
+    if(STATE._lastStrategyPanel && strategyPanelEl){
+      strategyPanelEl.innerHTML = STATE._lastStrategyPanel;
+    }
   }
 
   // Trade plan using ATR and swing points with ADAPTIVE POSITION SIZING
@@ -21524,91 +21541,105 @@ async function runAnalysis(){
     }
     
     // ========== CRITICAL FIX: Check if price is ALREADY at PENDING entry ==========
-    // If PENDING shows entry range AND current price is already inside that range AND confidence >= 60%
-    // Then upgrade to immediate BUY/SELL (user caught this bug on first trade!)
+    // If PENDING shows entry range AND current price is already inside that range
+    // Then upgrade to immediate BUY/SELL - PENDING means "wait for price" not "wait at price"!
     if(out.recommendation && (out.recommendation.includes('PENDING LONG') || out.recommendation.includes('PENDING SHORT'))){
       const isPendingLong = out.recommendation.includes('PENDING LONG');
       const last = STATE.history && STATE.history.length > 0 ? STATE.history[STATE.history.length - 1] : null;
       const currentPrice = last ? last.c : null;
       const probability = out.probability || 0;
       
-      // Check if price is already within entry range
-      if(plan && plan.pending && currentPrice && Number.isFinite(plan.entryMid)){
+      // METHOD 1: Check pendingPlan.atPOI field if available (most accurate)
+      let priceAtEntry = false;
+      if(out.pendingPlan && out.pendingPlan.atPOI === true){
+        priceAtEntry = true;
+        console.log('[PENDING CHECK] atPOI=true from pendingPlan - price is at entry zone');
+      }
+      
+      // METHOD 2: Check if price is already within entry range
+      if(!priceAtEntry && plan && plan.pending && currentPrice && Number.isFinite(plan.entryMid)){
         const entryStr = plan.entry || '';
         const match = entryStr.match(/(\d+\.?\d*)\s+to\s+(\d+\.?\d*)/);
         
         if(match){
           const entryLow = parseFloat(match[1]);
           const entryHigh = parseFloat(match[2]);
-          const priceAtEntry = currentPrice >= entryLow && currentPrice <= entryHigh;
+          priceAtEntry = currentPrice >= entryLow && currentPrice <= entryHigh;
+        }
+      }
+      
+      // If price is ALREADY at entry, upgrade to immediate execution (regardless of confidence)
+      // User requirement: "once price reaches the range, system must change to SELL NOW or BUY NOW immediately"
+      if(priceAtEntry){
+        const newRec = isPendingLong ? 'BUY' : 'SELL';
+        const entryInfo = plan && plan.entry ? plan.entry : 'entry zone';
+        console.warn(`[PENDING UPGRADE] Price ${currentPrice ? currentPrice.toFixed(2) : 'N/A'} is ALREADY at ${entryInfo} - Upgrading PENDING to ${newRec}`);
+        
+        // CRITICAL: Update the actual recommendation variable (not just display)
+        out.recommendation = newRec;
+        
+        // Update reasons to remove 'awaiting confirmation' since we're now executing
+        if(out.reasons && Array.isArray(out.reasons)){
+          out.reasons = out.reasons.filter(r => !/awaiting|pending|wait/i.test(r));
+          out.reasons.unshift(`✅ Price at ${entryInfo} - executing immediately`);
+        }
+        
+        // Update the main recommendation display at top of page
+        if(recEl){
+          const currentRecText = recEl.textContent || recEl.innerHTML || '';
+          if(currentRecText.includes('Recommendation:')){
+            setText(recEl, currentRecText.replace(/Recommendation:\s*PENDING\s*(LONG|SHORT)/i, `Recommendation: ${newRec}`));
+          } else {
+            setText(recEl, `Recommendation: ${newRec}`);
+          }
+        }
+        
+        // Update reasons display
+        if(reasonsEl && out.reasons){
+          setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
+        }
+        
+        // Update the trade plan UI text to show upgrade
+        const upgradeWarning = `<br/><br/><strong style="color:#10b981;font-size:1.15em;">✅ UPGRADED TO ${newRec}</strong><br/>Price ${currentPrice ? currentPrice.toFixed(2) : ''} is ALREADY at ${entryInfo}.<br/><strong style="color:#10b981;">🚀 ENTER NOW - No need to wait!</strong>`;
+        const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
+        tradePlanEl.innerHTML = currentText + upgradeWarning;
+        
+        // Skip the PENDING direction warning below
+        return;
+      }
+      
+      // If price NOT at entry but we still have PENDING (normal case)
+      if(!priceAtEntry){
+        const entryLow = plan && plan.entryLow ? plan.entryLow : null;
+        const entryHigh = plan && plan.entryHigh ? plan.entryHigh : null;
+        
+        // CRITICAL FIX: Handle DOWNGRADE case (BUY → PENDING LONG when confidence drops)
+        if(probability < 60 && ['BUY', 'SELL'].includes(out.recommendation)){
+          const oldRec = out.recommendation;
+          const newRec = out.recommendation === 'BUY' ? 'PENDING LONG' : 'PENDING SHORT';
+          console.warn(`[PENDING DOWNGRADE] ${oldRec} → ${newRec} because price NOT at entry and confidence ${probability}% < 60%`);
           
-          // If price is already at entry AND confidence >= 60%, upgrade to immediate entry
-          if(priceAtEntry && probability >= 60){
-            const newRec = isPendingLong ? 'BUY' : 'SELL';
-            console.warn(`[PENDING UPGRADE] Price ${currentPrice.toFixed(2)} is ALREADY at entry (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) with ${probability}% confidence - Upgrading PENDING to ${newRec}`);
-            
-            // CRITICAL: Update the actual recommendation variable (not just display)
-            out.recommendation = newRec;
-            
-            // Update reasons to remove 'awaiting confirmation' since we're now executing
-            if(out.reasons && Array.isArray(out.reasons)){
-              out.reasons = out.reasons.filter(r => !/awaiting|pending|wait/i.test(r));
-              out.reasons.unshift(`✅ Price at entry zone (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) - executing immediately`);
-            }
-            
-            // Update the main recommendation display at top of page
-            if(recEl){
-              setText(recEl, `Recommendation: ${newRec}`);
-            }
-            
-            // Update reasons display
-            if(reasonsEl && out.reasons){
-              setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
-            }
-            
-            // Update the trade plan UI text to show upgrade
-            const upgradeWarning = `<br/><br/><strong style="color:#10b981;font-size:1.15em;">✅ UPGRADED TO ${newRec}</strong><br/>Price ${currentPrice.toFixed(2)} is ALREADY at entry zone (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) with ${probability}% confidence.<br/><strong style="color:#10b981;">🚀 ENTER NOW - No need to wait!</strong>`;
-            const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
-            tradePlanEl.innerHTML = currentText + upgradeWarning;
-            
-            // Skip the PENDING direction warning below
-            return;
+          // Update recommendation variable
+          out.recommendation = newRec;
+          
+          // Update reasons
+          if(out.reasons && Array.isArray(out.reasons)){
+            out.reasons = out.reasons.filter(r => !/executing immediately/i.test(r));
+            out.reasons.push(`⚠️ Confidence ${probability}% < 60% - Using PENDING setup`);
           }
           
-          // CRITICAL FIX: Handle DOWNGRADE case (BUY → PENDING LONG when confidence drops)
-          // This happens when initial signal is strong but later checks reduce confidence
-          else if(!priceAtEntry && probability < 60 && ['BUY', 'SELL'].includes(out.recommendation)){
-            const oldRec = out.recommendation;
-            const newRec = out.recommendation === 'BUY' ? 'PENDING LONG' : 'PENDING SHORT';
-            console.warn(`[PENDING DOWNGRADE] ${oldRec} → ${newRec} because price NOT at entry (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) and confidence ${probability}% < 60%`);
-            
-            // Update recommendation variable
-            out.recommendation = newRec;
-            
-            // Update reasons
-            if(out.reasons && Array.isArray(out.reasons)){
-              out.reasons = out.reasons.filter(r => !/executing immediately/i.test(r));
-              out.reasons.push(`⚠️ Confidence ${probability}% < 60% - Using PENDING setup`);
-            }
-            
-            // Update display
-            if(recEl){
-              setText(recEl, `Recommendation: ${newRec}`);
-            }
-            if(reasonsEl && out.reasons){
-              setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
-            }
-            
-            // Add downgrade warning to trade plan
-            const downgradeWarning = `<br/><br/><strong style="color:#f59e0b;font-size:1.15em;">⚠️ DOWNGRADED TO ${newRec}</strong><br/>Confidence ${probability}% is below 60% threshold OR price not at entry yet.<br/>Wait for price to reach entry zone (${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}) before entering.`;
-            const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
-            tradePlanEl.innerHTML = currentText + downgradeWarning;
+          // Update display
+          if(recEl){
+            setText(recEl, `Recommendation: ${newRec}`);
+          }
+          if(reasonsEl && out.reasons){
+            setText(reasonsEl, `Reasons: ${out.reasons.join('; ')}`);
           }
         }
       }
     }
     
-    // ========== PENDING SIGNAL DIRECTION CLARIFICATION ==========
+    // Show PENDING directional warning (only if still PENDING after checks above)
     if(out.recommendation && (out.recommendation.includes('PENDING LONG') || out.recommendation.includes('PENDING SHORT'))){
       const isPendingLong = out.recommendation.includes('PENDING LONG');
       const directionWarning = isPendingLong 
@@ -22099,7 +22130,10 @@ async function onSymbolChange(){
   if(tradePlanEl) tradePlanEl.innerHTML = '';
   const strategyPanelEl = document.getElementById('strategyPanel');
   // DON'T clear strategy panel - it should accumulate detailed analysis, not alternate
-  // if(strategyPanelEl) strategyPanelEl.innerHTML = '';
+  // Restore last good content if it exists (prevent content from disappearing)
+  if(strategyPanelEl && STATE._lastStrategyPanel && !strategyPanelEl.innerHTML){
+    strategyPanelEl.innerHTML = STATE._lastStrategyPanel;
+  }
 
   // Fetch display and analysis histories in parallel to reduce wait time (performance improvement Oct 2025)
   let displayPromise, analysisPromise;
