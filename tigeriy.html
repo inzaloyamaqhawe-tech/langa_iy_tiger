@@ -58,7 +58,7 @@
   <div id="loginScreen">
     <div id="loginBox">
       <h1>Inzalo Yamaqhawe</h1>
-      <p class="subtitle">Welcome to Professional Trading System</p>
+      <p class="subtitle">Welcome to Robust Trading Analysis</p>
       
       <label for="username">Username</label>
       <input type="text" id="username" placeholder="Enter your username" autocomplete="username" />
@@ -356,6 +356,14 @@ function applyBackgroundColor(color){
         el.style.background = '#f5f5f5';
         el.style.color = '#000000';
       });
+      // Login box
+      const loginBox = document.getElementById('loginBox');
+      if(loginBox){
+        loginBox.style.background = '#f5f5f5';
+        loginBox.style.color = '#000000';
+        const h1 = loginBox.querySelector('h1');
+        if(h1) h1.style.color = '#000000';
+      }
       break;
     case 'yellow':
       root.style.setProperty('--bg', '#fff9e6');
@@ -378,6 +386,14 @@ function applyBackgroundColor(color){
         el.style.background = '#fff3cc';
         el.style.color = '#000000';
       });
+      // Login box
+      const loginBox = document.getElementById('loginBox');
+      if(loginBox){
+        loginBox.style.background = '#fff3cc';
+        loginBox.style.color = '#000000';
+        const h1 = loginBox.querySelector('h1');
+        if(h1) h1.style.color = '#000000';
+      }
       break;
     case 'blue':
       root.style.setProperty('--bg', '#e6f2ff');
@@ -400,6 +416,14 @@ function applyBackgroundColor(color){
         el.style.background = '#cce5ff';
         el.style.color = '#000000';
       });
+      // Login box
+      const loginBox = document.getElementById('loginBox');
+      if(loginBox){
+        loginBox.style.background = '#cce5ff';
+        loginBox.style.color = '#000000';
+        const h1 = loginBox.querySelector('h1');
+        if(h1) h1.style.color = '#000000';
+      }
       break;
     case 'grey':
       root.style.setProperty('--bg', '#cccccc');
@@ -422,6 +446,14 @@ function applyBackgroundColor(color){
         el.style.background = '#b3b3b3';
         el.style.color = '#000000';
       });
+      // Login box
+      const loginBox = document.getElementById('loginBox');
+      if(loginBox){
+        loginBox.style.background = '#b3b3b3';
+        loginBox.style.color = '#000000';
+        const h1 = loginBox.querySelector('h1');
+        if(h1) h1.style.color = '#000000';
+      }
       break;
     case 'black':
       root.style.setProperty('--bg', '#000000');
@@ -444,6 +476,14 @@ function applyBackgroundColor(color){
         el.style.background = '#1a1a1a';
         el.style.color = '#ffffff';
       });
+      // Login box
+      const loginBox = document.getElementById('loginBox');
+      if(loginBox){
+        loginBox.style.background = '#1a1a1a';
+        loginBox.style.color = '#ffffff';
+        const h1 = loginBox.querySelector('h1');
+        if(h1) h1.style.color = '#ffffff';
+      }
       break;
     default: // dark
       root.style.setProperty('--bg', '#071127');
@@ -19468,43 +19508,47 @@ async function runAnalysis(){
       
       // If news sentiment OPPOSES our signal
       if(sentiment.sentiment !== 0 && recSide !== 0 && sentiment.sentiment !== recSide){
-        const newsDir = sentiment.sentiment > 0 ? 'bullish' : 'bearish';
-        const sigDir = recSide > 0 ? 'BUY' : 'SELL';
-        out.reasons = (out.reasons||[]).concat([`⚠ FORWARD News is ${newsDir} but technical signal is ${sigDir}`]);
-        if(sentiment.reasons.length) out.reasons = (out.reasons||[]).concat(sentiment.reasons.slice(0,2));
+        const newsDir = sentiment.sentiment > 0 ? 'BULLISH (price should rise)' : 'BEARISH (price should fall)';
+        const sigDir = recSide > 0 ? 'BUY (expecting rise)' : 'SELL (expecting fall)';
+        const newsEvents = sentiment.reasons.length > 0 ? sentiment.reasons.join(', ') : 'market sentiment';
+        out.reasons = (out.reasons||[]).concat([`⚠️ NEWS CONFLICT: News is ${newsDir} due to: ${newsEvents}. BUT technical signal is ${sigDir}. Conflict detected!`]);
+        if(sentiment.reasons.length > 2) out.reasons = (out.reasons||[]).concat(sentiment.reasons.slice(2,4));
         
         // BALANCED APPROACH: News gets a vote, not a veto
         // Strong predictive news (strength >= 5) can influence, very strong (>=7) can override weak signals
         if(newsStrength >= 7 && out.probability < 75){
           // Very strong PREDICTIVE news can flip weak technical signals
+          const newDir = sentiment.sentiment > 0 ? 'rise' : 'fall';
           out.recommendation = sentiment.sentiment > 0 ? 'BUY' : 'SELL';
           out.probability = Math.min(85, 65 + newsStrength*2);
           out.source = (out.source ? out.source + '+NEWSFLIP' : 'NEWSFLIP');
-          out.reasons.unshift('⚡ Strong PREDICTIVE news overrides weak technical signal');
+          out.reasons.unshift(`⚡ STRONG NEWS OVERRIDE: ${newsEvents} will cause price to ${newDir}. Flipping technical signal to match news.`);
         } else if(newsStrength >= 5) {
           // Strong news downgrades confidence but doesn't flip
           out.probability = Math.max(55, out.probability - (newsStrength * 3));
-          out.reasons.unshift(`News-Technical conflict reduces confidence (news strength: ${newsStrength.toFixed(1)})`);
+          out.reasons.unshift(`⚠️ News-Technical conflict: News says ${newsDir.toLowerCase()} but chart says ${sigDir.toLowerCase()}. Reducing confidence by ${(newsStrength * 3).toFixed(0)}%.`);
         } else if(newsStrength >= 3) {
           // Moderate news creates caution
           out.probability = Math.max(60, out.probability - 8);
-          out.reasons.unshift('Moderate news-technical divergence, proceed with caution');
+          out.reasons.unshift(`⚠️ Moderate news-technical divergence. News suggests opposite direction. Proceed with caution.`);
         } else {
           // Weak news opposition is noted but ignored
-          out.reasons.unshift('Weak news opposition noted, technical signal remains valid');
+          out.reasons.unshift(`ℹ️ Weak news opposition noted (${newsDir.toLowerCase()}), but technical signal ${sigDir.toLowerCase()} remains dominant.`);
         }
       }
       // If news ALIGNS with signal → boost confidence
       else if(sentiment.sentiment !== 0 && recSide === sentiment.sentiment){
-        if(sentiment.reasons.length) out.reasons = (out.reasons||[]).concat([`✓ PREDICTIVE News confirms: ${sentiment.reasons[0]}`]);
+        const direction = sentiment.sentiment > 0 ? 'BULLISH (rise)' : 'BEARISH (fall)';
+        const newsEvents = sentiment.reasons.length > 0 ? sentiment.reasons[0] : 'positive market sentiment';
+        out.reasons = (out.reasons||[]).concat([`✅ NEWS CONFIRMS: ${newsEvents} → Price expected to ${sentiment.sentiment > 0 ? 'RISE' : 'FALL'}. Technical and news ALIGNED!`]);
         // Boost scales with news strength
         const boost = Math.min(8, newsStrength * 1.5);
         out.probability = Math.min(96, (out.probability||75) + boost);
-        out.reasons.unshift(`News-Technical alignment boosts confidence (+${boost.toFixed(1)})`);
+        out.reasons.unshift(`✅ News-Technical PERFECT ALIGNMENT: Both say ${direction}. Confidence boosted +${boost.toFixed(1)}%`);
       }
       // If news is neutral or missing
       else if(sentiment.sentiment === 0 && recSide !== 0){
-        out.reasons.push(`No strong PREDICTIVE news catalyst found (checked ${headlines.length} items)`);
+        out.reasons.push(`ℹ️ No strong news catalyst found (checked ${headlines.length} items). Relying on pure technical analysis.`);
       }
     }
   }catch{}
@@ -20957,11 +21001,11 @@ async function runAnalysis(){
           ictLines.push(`<br/><strong>Risk Rating:</strong> <span style="color:${riskColor};">${riskRating}</span>`);
         }
       } // End of: if(last && last.c) block
+      } // Close else block for if(!ict)
       
       // ALWAYS append ICT lines (whether loading, error, or complete)
       const currentText = tradePlanEl.innerHTML || tradePlanEl.textContent || '';
       tradePlanEl.innerHTML = currentText + ictLines.join('<br/>');
-      } // Close else block for if(!ict)
     }catch(e){ 
       console.error('[ICT Display] Error rendering ICT analysis:', e); 
       console.error('[ICT Display] Stack:', e.stack);
