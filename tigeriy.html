@@ -2164,7 +2164,7 @@ async function applyConservativeGates(out, d, interval){
     }catch{}
 
     // Cooldown: avoid rapid flip to opposite within N minutes (longer on higher TF)
-    // STABILITY: Block opposite signals entirely during cooldown, don't just cap probability
+    // STABILITY: Keep previous signal during cooldown instead of flipping
     try{
       const now = Date.now();
       const recU = String(out.recommendation||'').toUpperCase();
@@ -2176,11 +2176,18 @@ async function applyConservativeGates(out, d, interval){
         if(['1h','2h','4h','6h','8h','12h'].includes(interval)) cdMin = Math.max(cdMin, 30);
         if(['1d','3d','1w','1M'].includes(interval)) cdMin = Math.max(cdMin, 60);
         if(STATE.lastSignal.side !== side && mins < cdMin){
-          // BLOCK opposite signal entirely - force HOLD during cooldown
+          // KEEP previous signal direction, downgrade to PENDING if needed
           const timeLeft = Math.max(0, cdMin - Math.floor(mins));
-          out.recommendation = 'HOLD';
-          out.probability = 65;
-          out.reasons = [`⏱️ SIGNAL STABILITY: Last signal was ${STATE.lastSignal.side > 0 ? 'BUY' : 'SELL'} ${Math.floor(mins)}m ago. Cooldown active (${timeLeft}m remaining). Not flipping to opposite direction yet - waiting for confirmation.`];
+          if(STATE.lastSignal.side > 0){
+            // Last was BUY/LONG - keep that direction
+            out.recommendation = recU.includes('STRONG') ? 'PENDING LONG' : 'PENDING LONG';
+            out.probability = Math.min(out.probability, 75);
+          } else {
+            // Last was SELL/SHORT - keep that direction
+            out.recommendation = recU.includes('STRONG') ? 'PENDING SHORT' : 'PENDING SHORT';
+            out.probability = Math.min(out.probability, 75);
+          }
+          out.reasons = [`⏱️ STABILITY: Maintaining ${STATE.lastSignal.side > 0 ? 'LONG' : 'SHORT'} bias (cooldown ${timeLeft}m left, prevents flip-flopping)`];
         }
       }
     }catch{}
