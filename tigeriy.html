@@ -1062,7 +1062,13 @@ let STATE = {
   maxExposurePerSymbolPercent: 0.03, // default 3% max exposure per symbol
   globalDailyLossLimit: null // set to a number (absolute) to trigger kill-switch
   ,
-  _killed: false
+  _killed: false,
+  // Blueprint stability variables
+  lastBOS: null,            // {side:1|-1, price:number, t:number, displacement:number} - tracks last confirmed BOS
+  lastInvalidation: null,   // {t:number, reason:string} - tracks when/why recommendation was invalidated
+  structureState: 'neutral', // 'uptrend' | 'downtrend' | 'neutral' | 'transition'
+  htfBias: 0,               // -1 (bearish) | 0 (neutral) | 1 (bullish) - frozen until invalidated
+  confirmationFlag: false   // Must be true to issue trades (BOS + displacement + imbalance + retest)
 };
 // Store the last main analysis output to align snapshot current interval
 STATE.lastAnalysisOut = null;
@@ -1770,6 +1776,263 @@ function computeExpectedNextMove(d, interval){
   }catch{ return null; }
 }
 
+// ========== BLUEPRINT STRUCTURED SCORING SYSTEM ==========
+// Deterministic scoring per the 72-point blueprint for stable, non-candle-dependent analysis
+
+/**
+ * Structure Score (0-30): HTF bias alignment + recent BOS/CHoCH + correct zone
+ */
+function computeStructureScore(d, htf, interval){
+  let score = 0;
+  try{
+    // HTF bias aligned (0-10 points)
+    if(STATE.htfBias !== 0){
+      const currentTrend = STATE.structureState;
+      if((STATE.htfBias > 0 && currentTrend === 'uptrend') || (STATE.htfBias < 0 && currentTrend === 'downtrend')){
+        score += 10;
+      } else if(currentTrend !== 'transition'){
+        score += 5; // Partial credit for non-conflicting
+      }
+    }
+    
+    // Recent BOS/CHoCH in intended direction (0-10 points)
+    if(STATE.lastBOS && (Date.now() - STATE.lastBOS.t) < 3600000){ // Within 1 hour
+      score += 10;
+    } else if(STATE.lastBOS && (Date.now() - STATE.lastBOS.t) < 7200000){ // Within 2 hours
+      score += 5;
+    }
+    
+    // Correct zone - discount for longs, premium for shorts (0-10 points)
+    const last = d[d.length - 1];
+    if(last && last.c && last.sma50){
+      const priceVsSMA = (last.c - last.sma50) / last.sma50;
+      // In discount zone (below SMA) favors longs
+      if(priceVsSMA < -0.02) score += (STATE.structureState === 'uptrend' ? 10 : 3);
+      // In premium zone (above SMA) favors shorts
+      else if(priceVsSMA > 0.02) score += (STATE.structureState === 'downtrend' ? 10 : 3);
+      else score += 5; // Near equilibrium
+    }
+  }catch{}
+  return Math.min(30, Math.max(0, score));
+}
+
+/**
+ * Liquidity/Imbalance Score (0-30): Opposite-side sweep + fresh imbalance + fresh OB/SR
+ */
+function computeLiquidityScore(d, interval){
+  let score = 0;
+  try{
+    const last = d[d.length - 1];
+    if(!last) return 0;
+    
+    // Opposite-side sweep detected (0-10 points)
+    // Check if recent high/low was taken out then rejected
+    const lookback = Math.min(20, d.length);
+    const recent = d.slice(-lookback);
+    const highs = recent.map(b => b.h || b.c);
+    const lows = recent.map(b => b.l || b.c);
+    const prevHigh = Math.max(...highs.slice(0, -1));
+    const prevLow = Math.min(...lows.slice(0, -1));
+    if(last.h && last.h > prevHigh && last.c < prevHigh) score += 10; // Buy-side sweep
+    else if(last.l && last.l < prevLow && last.c > prevLow) score += 10; // Sell-side sweep
+    
+    // Fresh imbalance/FVG (0-10 points)
+    // Simplified: if displacement > 0.7× ATR detected recently
+    if(STATE.lastBOS && STATE.lastBOS.displacement && STATE.lastBOS.displacement > 0.7){
+      const age = (Date.now() - STATE.lastBOS.t) / 60000; // minutes
+      if(age < 30) score += 10;
+      else if(age < 60) score += 6;
+      else if(age < 120) score += 3;
+    }
+    
+    // Fresh OB or SR quality (0-10 points)
+    // Check if price is near untested S/R levels
+    const atr = last.atr || (last.h && last.l ? (last.h - last.l) : 0);
+    if(atr > 0){
+      // Simplified: if price within 0.2× ATR of SMA50 (acting as dynamic S/R)
+      if(last.sma50 && Math.abs(last.c - last.sma50) < 0.2 * atr){
+        score += 10;
+      }
+    }
+  }catch{}
+  return Math.min(30, Math.max(0, score));
+}
+
+/**
+ * Trend Filter Score (0-20): EMA/VWAP alignment + volume impulse
+ */
+function computeTrendFilterScore(d, interval){
+  let score = 0;
+  try{
+    const last = d[d.length - 1];
+    if(!last) return 0;
+    
+    // EMA/VWAP alignment (0-12 points)
+    let emaAlign = 0;
+    if(last.c && last.ema20 && last.ema50){
+      // Price above both EMAs (bullish)
+      if(last.c > last.ema20 && last.c > last.ema50 && last.ema20 > last.ema50){
+        emaAlign = 12;
+      }
+      // Price below both EMAs (bearish)
+      else if(last.c < last.ema20 && last.c < last.ema50 && last.ema20 < last.ema50){
+        emaAlign = 12;
+      }
+      // Partial alignment
+      else if(last.c > last.ema20 || last.c < last.ema20){
+        emaAlign = 6;
+      }
+    }
+    score += emaAlign;
+    
+    // Volume impulse > 1.3× baseline (0-8 points)
+    if(last.v && last.sma20Vol){
+      const volRatio = last.v / last.sma20Vol;
+      if(volRatio > 1.5) score += 8;
+      else if(volRatio > 1.3) score += 5;
+      else if(volRatio > 1.1) score += 2;
+    }
+  }catch{}
+  return Math.min(20, Math.max(0, score));
+}
+
+/**
+ * News/Session Score (0-20): Scenario direction × confidence + session alignment
+ */
+function computeNewsSessionScore(d, interval, newsBias){
+  let score = 0;
+  try{
+    // Scenario direction × confidence (0-12 points)
+    if(newsBias && Math.abs(newsBias) > 0){
+      const newsStrength = Math.abs(newsBias);
+      if(newsStrength > 1.0) score += 12;
+      else if(newsStrength > 0.5) score += 8;
+      else if(newsStrength > 0.2) score += 4;
+    }
+    
+    // Session alignment (0-8 points)
+    const hour = new Date().getUTCHours();
+    // London session (8-12 UTC): accumulation/manipulation
+    if(hour >= 8 && hour < 12) score += 6;
+    // NY session (13-17 UTC): distribution
+    else if(hour >= 13 && hour < 17) score += 8;
+    // Asia session (0-4 UTC): accumulation
+    else if(hour >= 0 && hour < 4) score += 4;
+  }catch{}
+  return Math.min(20, Math.max(0, score));
+}
+
+/**
+ * Risk Score (0-10): Inverted - lower is safer. Volatility regime, spreads, event proximity
+ */
+function computeRiskScore(d, interval){
+  let risk = 0;
+  try{
+    const last = d[d.length - 1];
+    if(!last) return 5;
+    
+    // High volatility increases risk
+    const atr = last.atr || 0;
+    const atrPct = last.c ? (atr / last.c) * 100 : 0;
+    if(atrPct > 3) risk += 4;
+    else if(atrPct > 2) risk += 2;
+    
+    // Event proximity (simplified - could check macro calendar)
+    const hour = new Date().getUTCHours();
+    // Pre-NY open (12-13 UTC) or pre-London (7-8 UTC): elevated risk
+    if((hour >= 7 && hour < 8) || (hour >= 12 && hour < 13)) risk += 3;
+    
+    // Wide spreads proxy: if recent bars have large wicks
+    if(last.h && last.l && last.c){
+      const wickSize = (last.h - last.l) / last.c;
+      if(wickSize > 0.02) risk += 3;
+    }
+  }catch{}
+  return Math.min(10, Math.max(0, risk));
+}
+
+/**
+ * Compute net score and confirmation flag per blueprint
+ */
+function computeNetScore(structScore, liqScore, trendScore, newsScore, riskScore){
+  // Weighted sum: Structure(30) + Liquidity(30) + Trend(20) + News(20) - Risk(10) = max 90
+  const netScore = structScore + liqScore + trendScore + newsScore - riskScore;
+  return Math.min(100, Math.max(0, netScore)); // Normalize to 0-100
+}
+
+/**
+ * Check confirmation flag: BOS + displacement + imbalance + feasible retest
+ */
+function checkConfirmationFlag(d, interval){
+  try{
+    // Require recent BOS with displacement
+    if(!STATE.lastBOS) return false;
+    const age = (Date.now() - STATE.lastBOS.t) / 60000; // minutes
+    if(age > 120) return false; // BOS too old (>2 hours)
+    if(!STATE.lastBOS.displacement || STATE.lastBOS.displacement < 0.7) return false;
+    
+    // Imbalance present (proxy: displacement exists)
+    // Feasible retest (price not too far from BOS level)
+    const last = d[d.length - 1];
+    if(!last || !last.c) return false;
+    const distanceFromBOS = Math.abs(last.c - STATE.lastBOS.price) / last.c;
+    if(distanceFromBOS > 0.03) return false; // More than 3% away
+    
+    return true;
+  }catch{
+    return false;
+  }
+}
+
+/**
+ * Forecast next interval: direction, probability, expected move
+ * Per blueprint point 21-27
+ */
+function forecastNextInterval(d, htf, interval, structScore, liqScore, trendScore, newsScore, riskScore){
+  try{
+    const netScore = computeNetScore(structScore, liqScore, trendScore, newsScore, riskScore);
+    
+    // Directional probability from net score
+    // 0-40: Down bias, 40-60: Neutral, 60-100: Up bias
+    let direction = 'NEUTRAL';
+    let probability = 50.000;
+    
+    if(netScore >= 60){
+      direction = 'UP';
+      // Map 60-100 to 60-95% probability
+      probability = 60 + ((netScore - 60) / 40) * 35;
+    } else if(netScore <= 40){
+      direction = 'DOWN';
+      // Map 0-40 to 60-95% probability (inverted)
+      probability = 60 + ((40 - netScore) / 40) * 35;
+    } else {
+      direction = 'NEUTRAL';
+      probability = 50 + ((netScore - 50) * 0.2); // Slight bias toward score
+    }
+    
+    // Expected magnitude from ATR
+    const last = d[d.length - 1];
+    const atr = last?.atr || 0;
+    const atrPct = last?.c ? (atr / last.c) * 100 : 0;
+    const directionalStrength = Math.abs(netScore - 50) / 50; // 0 to 1
+    const expectedMove = atrPct * directionalStrength;
+    
+    return {
+      direction,
+      probability: Number(probability.toFixed(3)),
+      expectedMove: Number(expectedMove.toFixed(3)),
+      netScore: Number(netScore.toFixed(3))
+    };
+  }catch{
+    return {
+      direction: 'NEUTRAL',
+      probability: 50.000,
+      expectedMove: 0.000,
+      netScore: 50.000
+    };
+  }
+}
+
 // Apply conservative gates for higher timeframes and macro caution
 async function applyConservativeGates(out, d, interval){
   try{
@@ -2163,31 +2426,53 @@ async function applyConservativeGates(out, d, interval){
       }
     }catch{}
 
-    // Cooldown: avoid rapid flip to opposite within N minutes (longer on higher TF)
-    // STABILITY: Keep previous signal during cooldown instead of flipping
+    // ========== BLUEPRINT NO-FLIP POLICY (Point 29, 53) ==========
+    // Keep recommendation until proper invalidation: opposite BOS + displacement + cross-asset coherence
+    // Don't flip based on cooldown time - require actual structural invalidation
     try{
       const now = Date.now();
       const recU = String(out.recommendation||'').toUpperCase();
       const actionable = ['BUY','STRONG BUY','SELL','STRONG SELL','PENDING LONG','PENDING SHORT'].includes(recU);
       const side = recU.includes('SELL') || recU.includes('SHORT') ? -1 : (recU.includes('BUY') || recU.includes('LONG') ? 1 : 0);
+      
       if(actionable && side!==0 && STATE.lastSignal && typeof STATE.lastSignal.side==='number' && typeof STATE.lastSignal.t==='number'){
-        const mins = (now - STATE.lastSignal.t) / 60000;
-        let cdMin = SIGNAL_COOLDOWN_MIN;
-        if(['1h','2h','4h','6h','8h','12h'].includes(interval)) cdMin = Math.max(cdMin, 30);
-        if(['1d','3d','1w','1M'].includes(interval)) cdMin = Math.max(cdMin, 60);
-        if(STATE.lastSignal.side !== side && mins < cdMin){
-          // KEEP previous signal direction, downgrade to PENDING if needed
-          const timeLeft = Math.max(0, cdMin - Math.floor(mins));
-          if(STATE.lastSignal.side > 0){
-            // Last was BUY/LONG - keep that direction
-            out.recommendation = recU.includes('STRONG') ? 'PENDING LONG' : 'PENDING LONG';
-            out.probability = Math.min(out.probability, 75);
-          } else {
-            // Last was SELL/SHORT - keep that direction
-            out.recommendation = recU.includes('STRONG') ? 'PENDING SHORT' : 'PENDING SHORT';
-            out.probability = Math.min(out.probability, 75);
+        // Check if trying to flip to opposite direction
+        if(STATE.lastSignal.side !== side){
+          // INVALIDATION REQUIREMENTS per blueprint:
+          // 1. Opposite BOS with displacement
+          // 2. Cross-asset coherence (simplified: check if displacement strong enough)
+          // 3. OR high-tier event reversal (would need macro calendar check)
+          
+          let invalidated = false;
+          
+          // Check for opposite BOS with displacement
+          if(STATE.lastBOS && STATE.lastBOS.side === side && STATE.lastBOS.displacement >= 0.7){
+            const boAge = (now - STATE.lastBOS.t) / 60000;
+            if(boAge < 60){
+              invalidated = true;
+              STATE.lastInvalidation = {t: now, reason: `Opposite BOS with ${STATE.lastBOS.displacement.toFixed(2)}× ATR displacement`};
+            }
           }
-          out.reasons = [`⏱️ STABILITY: Maintaining ${STATE.lastSignal.side > 0 ? 'LONG' : 'SHORT'} bias (cooldown ${timeLeft}m left, prevents flip-flopping)`];
+          
+          // If NOT invalidated, maintain previous direction
+          if(!invalidated){
+            const mins = (now - STATE.lastSignal.t) / 60000;
+            const timeLeft = Math.floor(Math.max(0, 60 - mins)); // Show time until invalidation check expires
+            
+            if(STATE.lastSignal.side > 0){
+              // Maintain LONG bias
+              out.recommendation = 'PENDING LONG';
+              out.probability = Math.min(out.probability, 75.000);
+            } else {
+              // Maintain SHORT bias
+              out.recommendation = 'PENDING SHORT';
+              out.probability = Math.min(out.probability, 75.000);
+            }
+            out.reasons = [`🔒 NO-FLIP POLICY: Maintaining ${STATE.lastSignal.side > 0 ? 'LONG' : 'SHORT'} bias. Requires opposite BOS + displacement (≥0.7× ATR) to invalidate. Current: No valid invalidation detected.`];
+          } else {
+            // Invalidation confirmed - allow the flip
+            out.reasons = (out.reasons||[]).concat([`✓ INVALIDATION CONFIRMED: ${STATE.lastInvalidation.reason}. Flipping direction is now allowed.`]);
+          }
         }
       }
     }catch{}
@@ -14831,6 +15116,17 @@ function computeStructure(d){
   if(swingAnalysis.recentBOS.length > 0){
     const latestBOS = swingAnalysis.recentBOS[swingAnalysis.recentBOS.length - 1];
     bos = latestBOS.direction;
+    
+    // Update STATE.lastBOS for no-flip policy
+    STATE.lastBOS = {
+      side: latestBOS.direction,
+      price: latestBOS.price,
+      t: latestBOS.time,
+      displacement: latestBOS.displacement || 0
+    };
+    
+    // Update structure state for structured scoring
+    STATE.structureState = bos > 0 ? 'uptrend' : (bos < 0 ? 'downtrend' : 'neutral');
   }
   
   // Build swings array with labels (HH, HL, LH, LL)
