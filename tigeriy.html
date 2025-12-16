@@ -2041,6 +2041,245 @@ function forecastNextInterval(d, htf, interval, structScore, liqScore, trendScor
 }
 
 /**
+ * Calculate ADR (Average Daily Range) for feasibility checks - Blueprint Points 32, 55, 62
+ */
+function calculateADR(d, lookback = 14){
+  try{
+    if(!d || d.length < lookback) return null;
+    
+    let totalRange = 0;
+    let count = 0;
+    const recent = d.slice(-lookback);
+    
+    for(const bar of recent){
+      if(bar.h && bar.l && Number.isFinite(bar.h) && Number.isFinite(bar.l)){
+        totalRange += (bar.h - bar.l);
+        count++;
+      }
+    }
+    
+    if(count === 0) return null;
+    const adr = totalRange / count;
+    
+    // Calculate how much of ADR has been consumed today
+    const last = d[d.length - 1];
+    if(!last || !last.h || !last.l) return { adr, consumed: 0, remaining: adr, consumedPct: 0 };
+    
+    // Simplified: use recent range as proxy for today's movement
+    const recentRange = last.h - last.l;
+    const consumed = recentRange;
+    const remaining = Math.max(0, adr - consumed);
+    const consumedPct = (consumed / adr) * 100;
+    
+    return {
+      adr: Number(adr.toFixed(2)),
+      consumed: Number(consumed.toFixed(2)),
+      remaining: Number(remaining.toFixed(2)),
+      consumedPct: Number(consumedPct.toFixed(1))
+    };
+  }catch{
+    return null;
+  }
+}
+
+/**
+ * Check ADR/ATR feasibility for targets - Blueprint Points 32, 55
+ * Reject orders if TP1 requires >60-70% of remaining ADR
+ */
+function checkADRFeasibility(pendingPlan, adrData, currentPrice){
+  try{
+    if(!pendingPlan || !adrData || !adrData.remaining) return { feasible: true, reason: 'ADR data unavailable' };
+    
+    const isLong = pendingPlan.direction === 'LONG';
+    const tp1Distance = Math.abs(pendingPlan.tp1 - currentPrice);
+    const tp1Pct = (tp1Distance / currentPrice) * 100;
+    const remainingPct = (adrData.remaining / currentPrice) * 100;
+    
+    // Blueprint Point 55: Reject if TP1 requires >60-70% of remaining ADR
+    if(tp1Pct > remainingPct * 0.7){
+      return {
+        feasible: false,
+        reason: `TP1 requires ${tp1Pct.toFixed(1)}% move but only ${remainingPct.toFixed(1)}% ADR remaining (>${(remainingPct * 0.7).toFixed(1)}% threshold)`,
+        reducedTargets: {
+          tp1: isLong ? currentPrice + (adrData.remaining * 0.5) : currentPrice - (adrData.remaining * 0.5),
+          tp2: isLong ? currentPrice + (adrData.remaining * 0.7) : currentPrice - (adrData.remaining * 0.7),
+          tp3: isLong ? currentPrice + (adrData.remaining * 0.9) : currentPrice - (adrData.remaining * 0.9)
+        }
+      };
+    }
+    
+    return {
+      feasible: true,
+      reason: `TP1 requires ${tp1Pct.toFixed(1)}%, remaining ADR ${remainingPct.toFixed(1)}% - FEASIBLE`
+    };
+  }catch{
+    return { feasible: true, reason: 'Feasibility check error' };
+  }
+}
+
+/**
+ * Don't chase rule - Blueprint Point 62
+ * If price expanded >70% ADR in forecast direction, only pending at pullback
+ */
+function checkDontChaseRule(d, adrData, forecast){
+  try{
+    if(!adrData || adrData.consumedPct < 70) return { chasing: false, reason: 'ADR consumed < 70%' };
+    
+    const last = d[d.length - 1];
+    if(!last || !last.c) return { chasing: false, reason: 'No price data' };
+    
+    // Check if movement aligns with forecast direction
+    const lookback = Math.min(10, d.length);
+    const earlier = d[d.length - lookback];
+    if(!earlier || !earlier.c) return { chasing: false, reason: 'No historical data' };
+    
+    const moveDir = last.c > earlier.c ? 'UP' : 'DOWN';
+    const forecastDir = forecast.direction;
+    
+    if(moveDir === forecastDir && adrData.consumedPct > 70){
+      return {
+        chasing: true,
+        reason: `Price already moved ${moveDir} and consumed ${adrData.consumedPct.toFixed(1)}% of ADR. Don't chase - pending only at deep pullback.`
+      };
+    }
+    
+    return { chasing: false, reason: `Movement (${moveDir}) vs forecast (${forecastDir}) - not chasing` };
+  }catch{
+    return { chasing: false, reason: 'Chase check error' };
+  }
+}
+
+/**
+ * Pre-event abstention window - Blueprint Point 30
+ * Within 60-90min of high-impact events, disable new entries
+ */
+function checkPreEventWindow(){
+  try{
+    // Simplified: Check upcoming events from economic calendar
+    // In production, integrate with macro calendar
+    const now = new Date();
+    const hour = now.getUTCHours();
+    const minute = now.getUTCMinutes();
+    
+    // Common high-impact times (UTC):
+    // 13:30 - US CPI, NFP, retail sales
+    // 14:00 - Fed speeches
+    // 19:00 - FOMC decisions
+    const highImpactHours = [13, 14, 19];
+    
+    for(const eventHour of highImpactHours){
+      const minutesUntil = (eventHour * 60) - (hour * 60 + minute);
+      if(minutesUntil > 0 && minutesUntil <= 90){
+        return {
+          inWindow: true,
+          minutesUntil,
+          reason: `High-impact event likely at ${eventHour}:00 UTC (in ${minutesUntil}m). Pre-event abstention active.`
+        };
+      }
+    }
+    
+    return { inWindow: false, reason: 'No high-impact events within 90m' };
+  }catch{
+    return { inWindow: false, reason: 'Event check error' };
+  }
+}
+
+/**
+ * Conflict arbitration - Blueprint Point 61
+ * If Structure and News disagree strongly, produce dual pending plans
+ */
+function arbitrateConflict(structScore, newsScore, d, forecast){
+  try{
+    // Strong disagreement: structure bullish but news bearish (or vice versa)
+    const structBias = structScore > 15 ? 1 : (structScore < 10 ? -1 : 0);
+    const newsBias = newsScore > 10 ? 1 : (newsScore < 5 ? -1 : 0);
+    
+    if(structBias !== 0 && newsBias !== 0 && structBias !== newsBias){
+      // CONFLICT DETECTED
+      const longPlan = generatePendingOrderPlan(d, forecast, 1);
+      const shortPlan = generatePendingOrderPlan(d, forecast, -1);
+      
+      // Determine primary based on higher component score
+      const primary = structScore > newsScore ? 'LONG' : 'SHORT';
+      
+      return {
+        conflict: true,
+        reason: `Structure (${structScore}/30) vs News (${newsScore}/20) disagree. Dual plans generated.`,
+        longPlan,
+        shortPlan,
+        primary,
+        recommendation: 'WAIT'
+      };
+    }
+    
+    return { conflict: false, reason: 'No strong conflict' };
+  }catch{
+    return { conflict: false, reason: 'Arbitration error' };
+  }
+}
+
+/**
+ * Final safety net - Blueprint Point 72
+ * Comprehensive guardrail checks before allowing any trade
+ */
+function finalSafetyNet(out, d, forecast, confirmationFlag, adrFeasibility, preEventWindow, dontChase){
+  try{
+    const failures = [];
+    
+    // Check 1: Confirmation flag
+    if(!confirmationFlag){
+      failures.push('No confirmation (BOS + displacement + imbalance)');
+    }
+    
+    // Check 2: Pre-event window
+    if(preEventWindow && preEventWindow.inWindow){
+      failures.push(preEventWindow.reason);
+    }
+    
+    // Check 3: ADR feasibility
+    if(adrFeasibility && !adrFeasibility.feasible){
+      failures.push(adrFeasibility.reason);
+    }
+    
+    // Check 4: Don't chase
+    if(dontChase && dontChase.chasing){
+      failures.push(dontChase.reason);
+    }
+    
+    // Check 5: Data feed quality
+    const last = d[d.length - 1];
+    if(!last || !last.c || !Number.isFinite(last.c)){
+      failures.push('Data feed degraded - invalid price');
+    }
+    
+    // Check 6: Probability threshold
+    if(forecast && forecast.probability < 65.000){
+      failures.push(`Low probability (${forecast.probability.toFixed(3)}% < 65.000%)`);
+    }
+    
+    if(failures.length > 0){
+      return {
+        safe: false,
+        failures,
+        action: 'Recommendation = WAIT; pending plans only if safe'
+      };
+    }
+    
+    return {
+      safe: true,
+      failures: [],
+      action: 'All guardrails passed'
+    };
+  }catch{
+    return {
+      safe: false,
+      failures: ['Safety check error'],
+      action: 'Default to WAIT'
+    };
+  }
+}
+
+/**
  * Calculate R-based targets per blueprint Point 36
  * TP1 = 1R (first internal liquidity)
  * TP2 = 1.5R (external/internal)
@@ -20219,6 +20458,74 @@ async function runAnalysis(){
       pendingPlan = generatePendingOrderPlan(base, forecast, recDir || (forecast.direction === 'UP' ? 1 : -1));
     }
     
+    // ========== BLUEPRINT COMPREHENSIVE SAFETY CHECKS (Points 30-32, 48, 55, 61-62, 72) ==========
+    
+    // ADR/ATR feasibility (Points 32, 55)
+    const adrData = calculateADR(base);
+    let adrFeasibility = null;
+    if(pendingPlan && adrData){
+      adrFeasibility = checkADRFeasibility(pendingPlan, adrData, base[base.length - 1].c);
+      if(!adrFeasibility.feasible && adrFeasibility.reducedTargets){
+        // Update pending plan with reduced targets
+        pendingPlan.tp1 = Number(adrFeasibility.reducedTargets.tp1.toFixed(2));
+        pendingPlan.tp2 = Number(adrFeasibility.reducedTargets.tp2.toFixed(2));
+        pendingPlan.tp3 = Number(adrFeasibility.reducedTargets.tp3.toFixed(2));
+        pendingPlan.note = 'Targets reduced due to ADR constraints';
+      }
+    }
+    
+    // Don't chase rule (Point 62)
+    const dontChase = checkDontChaseRule(base, adrData, forecast);
+    if(dontChase.chasing){
+      // Downgrade to pending only
+      if(['BUY', 'STRONG BUY', 'SELL', 'STRONG SELL'].includes(out.recommendation)){
+        out.recommendation = recDir > 0 ? 'PENDING LONG' : 'PENDING SHORT';
+        out.probability = Math.min(out.probability, 70.000);
+        out.reasons = (out.reasons||[]).concat([`⚠️ DON'T CHASE: ${dontChase.reason}`]);
+      }
+    }
+    
+    // Pre-event abstention window (Point 30)
+    const preEventWindow = checkPreEventWindow();
+    if(preEventWindow.inWindow){
+      // Force WAIT state
+      out.recommendation = 'WAIT';
+      out.probability = 50.000;
+      out.reasons = [`⏸️ PRE-EVENT ABSTENTION: ${preEventWindow.reason}`, 'No new entries within 90m of high-impact events. Manage existing positions only.'];
+      console.warn('[BLUEPRINT] Pre-event window active - trading disabled');
+    }
+    
+    // Conflict arbitration (Point 61)
+    const conflict = arbitrateConflict(structScore, newsScore, base, forecast);
+    if(conflict.conflict && !preEventWindow.inWindow){
+      out.recommendation = 'WAIT';
+      out.probability = 55.000;
+      out.reasons = [`⚖️ CONFLICT: ${conflict.reason}`, `Primary bias: ${conflict.primary}. Dual pending plans available.`];
+      out.conflictPlans = {
+        longPlan: conflict.longPlan,
+        shortPlan: conflict.shortPlan,
+        primary: conflict.primary
+      };
+      console.warn('[BLUEPRINT] Structure vs News conflict - dual plans generated');
+    }
+    
+    // Final safety net (Point 72)
+    const safetyCheck = finalSafetyNet(out, base, forecast, STATE.confirmationFlag, adrFeasibility, preEventWindow, dontChase);
+    if(!safetyCheck.safe && !preEventWindow.inWindow){
+      // Force WAIT with clear explanation
+      out.recommendation = 'WAIT';
+      out.probability = 50.000;
+      out.reasons = [`🛡️ SAFETY NET TRIGGERED:`, ...safetyCheck.failures, safetyCheck.action];
+      console.warn('[BLUEPRINT] Safety net triggered:', safetyCheck.failures.join('; '));
+    }
+    
+    // Store all safety data in output
+    out.adrData = adrData;
+    out.adrFeasibility = adrFeasibility;
+    out.dontChase = dontChase;
+    out.preEventWindow = preEventWindow;
+    out.safetyCheck = safetyCheck;
+    
     // Store forecast in output
     out.forecast = forecast;
     out.structuredScores = {structScore, liqScore, trendScore, newsScore, riskScore};
@@ -20255,6 +20562,37 @@ async function runAnalysis(){
     forecastText += `Confidence: ${conf.category} - ${conf.action}\n`;
     forecastText += `Confirmation Flag: ${out.confirmationFlag ? '✅ PASS' : '❌ BLOCK'}\n`;
     
+    // Display ADR data if available (Blueprint Points 32, 55, 62)
+    if(out.adrData){
+      forecastText += `\n━━━━ 📏 ADR/ATR FEASIBILITY ━━━━\n`;
+      forecastText += `ADR (14-day avg): ${formatPrice(out.adrData.adr)}\n`;
+      forecastText += `Consumed today: ${formatPrice(out.adrData.consumed)} (${out.adrData.consumedPct}%)\n`;
+      forecastText += `Remaining: ${formatPrice(out.adrData.remaining)} (${(100 - out.adrData.consumedPct).toFixed(1)}%)\n`;
+      
+      if(out.adrFeasibility && !out.adrFeasibility.feasible){
+        forecastText += `⚠️ ${out.adrFeasibility.reason}\n`;
+      } else if(out.adrFeasibility){
+        forecastText += `✅ ${out.adrFeasibility.reason}\n`;
+      }
+      
+      if(out.dontChase && out.dontChase.chasing){
+        forecastText += `⚠️ ${out.dontChase.reason}\n`;
+      }
+    }
+    
+    // Display safety status (Blueprint Point 72)
+    if(out.safetyCheck){
+      forecastText += `\n━━━━ 🛡️ SAFETY STATUS ━━━━\n`;
+      if(out.safetyCheck.safe){
+        forecastText += `✅ All guardrails passed\n`;
+      } else {
+        forecastText += `❌ Safety net triggered:\n`;
+        out.safetyCheck.failures.forEach(f => {
+          forecastText += `  • ${f}\n`;
+        });
+      }
+    }
+    
     // Display structured scores
     if(out.structuredScores){
       const s = out.structuredScores;
@@ -20267,6 +20605,29 @@ async function runAnalysis(){
     }
     
     setText(recEl, `Recommendation: ${out.recommendation}${forecastText}`);
+  }
+  
+  // Display dual plans if conflict detected (Blueprint Point 61)
+  if(out.conflictPlans){
+    let conflictText = `\n\n━━━━ ⚖️ CONFLICT - DUAL PLANS ━━━━\n`;
+    conflictText += `Primary: ${out.conflictPlans.primary}\n\n`;
+    
+    if(out.conflictPlans.longPlan){
+      const lp = out.conflictPlans.longPlan;
+      conflictText += `LONG PLAN:\n`;
+      conflictText += `Entry: ${formatPrice(lp.entry)} (${lp.entryPOI})\n`;
+      conflictText += `SL: ${formatPrice(lp.stop)} | TP1: ${formatPrice(lp.tp1)} (1R)\n\n`;
+    }
+    
+    if(out.conflictPlans.shortPlan){
+      const sp = out.conflictPlans.shortPlan;
+      conflictText += `SHORT PLAN:\n`;
+      conflictText += `Entry: ${formatPrice(sp.entry)} (${sp.entryPOI})\n`;
+      conflictText += `SL: ${formatPrice(sp.stop)} | TP1: ${formatPrice(sp.tp1)} (1R)\n`;
+    }
+    
+    const current = recEl.textContent || recEl.innerHTML || '';
+    setText(recEl, current + conflictText);
   }
   
   // Display pending plan if available (Blueprint Point 51-52 format)
