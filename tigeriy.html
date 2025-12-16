@@ -979,32 +979,39 @@ function normalizeSearchTerm(q){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// CLEAN NUMBER FORMATTING - Remove trailing zeros and excessive decimals
+// BLUEPRINT STRICT ROUNDING (Point 49, 71)
+// Probabilities/scores: 3 decimals | Prices: 2 decimals | Always consistent
 // ══════════════════════════════════════════════════════════════════════════════
 function formatPrice(price, maxDecimals = 2) {
   if (!price || isNaN(price)) return '0.00';
   const num = parseFloat(price);
-  // For very small numbers (< 0.01), use more decimals
+  // For very small numbers (< 0.01), use more decimals but cap at 6
   if (Math.abs(num) < 0.01 && num !== 0) {
-    return num.toFixed(6).replace(/\.?0+$/, '');
+    return num.toFixed(6);
   }
-  // For normal prices, use maxDecimals
-  return num.toFixed(maxDecimals).replace(/\.?0+$/, '');
+  // Blueprint: prices always 2 decimals
+  return num.toFixed(2);
 }
 
-function formatPercent(percent, maxDecimals = 3) {
+function formatPercent(percent, decimals = 3) {
   if (percent === null || percent === undefined || isNaN(percent)) return '0.000';
   const num = parseFloat(percent);
-  return num.toFixed(maxDecimals).replace(/\.?0+$/, '');
+  // Blueprint: probabilities/percentages always 3 decimals
+  return num.toFixed(3);
 }
 
 function formatScore(score) {
   if (score === null || score === undefined || isNaN(score)) return '0.000';
   const num = parseFloat(score);
-  // Always show 3 decimals for scores, but remove trailing zeros
-  const formatted = num.toFixed(3);
-  // Remove trailing zeros after decimal, but keep at least one decimal place
-  return formatted.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '.0');
+  // Blueprint: scores always 3 decimals
+  return num.toFixed(3);
+}
+
+function formatProbability(prob) {
+  if (prob === null || prob === undefined || isNaN(prob)) return '0.000';
+  const num = parseFloat(prob);
+  // Blueprint: probabilities always 3 decimals (e.g., 76.845%)
+  return num.toFixed(3);
 }
 
 
@@ -2029,6 +2036,121 @@ function forecastNextInterval(d, htf, interval, structScore, liqScore, trendScor
       probability: 50.000,
       expectedMove: 0.000,
       netScore: 50.000
+    };
+  }
+}
+
+/**
+ * Calculate R-based targets per blueprint Point 36
+ * TP1 = 1R (first internal liquidity)
+ * TP2 = 1.5R (external/internal)
+ * TP3 = 2R (larger external)
+ */
+function calculateRTargets(entry, stop, direction){
+  try{
+    const risk = Math.abs(entry - stop);
+    if(risk === 0) return null;
+    
+    const isLong = direction > 0;
+    return {
+      entry: Number(entry.toFixed(2)),
+      stop: Number(stop.toFixed(2)),
+      tp1: Number((isLong ? entry + risk : entry - risk).toFixed(2)),
+      tp2: Number((isLong ? entry + risk * 1.5 : entry - risk * 1.5).toFixed(2)),
+      tp3: Number((isLong ? entry + risk * 2.0 : entry - risk * 2.0).toFixed(2)),
+      riskAmount: Number(risk.toFixed(2))
+    };
+  }catch{
+    return null;
+  }
+}
+
+/**
+ * Generate pending order plan per blueprint Point 33-34, 51-52
+ * Includes POI identification, conditional activation rules, and proper formatting
+ */
+function generatePendingOrderPlan(d, forecast, direction){
+  try{
+    const last = d[d.length - 1];
+    if(!last || !last.c) return null;
+    
+    const isLong = direction > 0;
+    const atr = last.atr || (last.h && last.l ? (last.h - last.l) : 0);
+    if(atr === 0) return null;
+    
+    // Identify POI (Point of Interest)
+    let entry, poiType;
+    if(isLong){
+      // Long: enter at discount zone (below price, near support)
+      // Use FVG50 proxy, OB edge, or SMA50 as dynamic support
+      if(last.sma50 && last.c > last.sma50){
+        entry = last.sma50; // Dynamic support
+        poiType = 'SMA50 (dynamic support)';
+      } else {
+        entry = last.c - (atr * 0.5); // 0.5 ATR pullback
+        poiType = 'FVG50 (discount zone)';
+      }
+    } else {
+      // Short: enter at premium zone (above price, near resistance)
+      if(last.sma50 && last.c < last.sma50){
+        entry = last.sma50; // Dynamic resistance
+        poiType = 'SMA50 (dynamic resistance)';
+      } else {
+        entry = last.c + (atr * 0.5); // 0.5 ATR pullback
+        poiType = 'FVG50 (premium zone)';
+      }
+    }
+    
+    // Stop placement: beyond opposite pivot or ATR buffer
+    const stop = isLong ? entry - (atr * 0.8) : entry + (atr * 0.8);
+    
+    // Calculate R-based targets
+    const targets = calculateRTargets(entry, stop, direction);
+    if(!targets) return null;
+    
+    return {
+      direction: isLong ? 'LONG' : 'SHORT',
+      entry: targets.entry,
+      entryPOI: poiType,
+      stop: targets.stop,
+      tp1: targets.tp1,
+      tp2: targets.tp2,
+      tp3: targets.tp3,
+      riskAmount: targets.riskAmount,
+      // Conditional activation per Point 34
+      activation: `Activate only on 1-5m micro BOS ${isLong ? 'up' : 'down'} inside POI. Cancel if high-impact news ≤90m or >2 mitigations.`,
+      // Expected R targets
+      rTargets: '1R (TP1), 1.5R (TP2), 2R (TP3)'
+    };
+  }catch{
+    return null;
+  }
+}
+
+/**
+ * Determine confidence category per blueprint Point 46
+ * High ≥ 75.000: issue active trade/pending
+ * Medium 65.000–74.999: issue pending only
+ * Low < 65.000: Wait, plan only
+ */
+function getConfidenceCategory(probability, confirmationFlag){
+  if(probability >= 75.000 && confirmationFlag){
+    return {
+      category: 'HIGH',
+      action: 'Active trade/pending',
+      description: 'High conviction - confirmation flag set'
+    };
+  } else if(probability >= 65.000 && probability < 75.000){
+    return {
+      category: 'MEDIUM',
+      action: 'Pending only (conditional)',
+      description: 'Moderate conviction - wait for micro confirmation'
+    };
+  } else {
+    return {
+      category: 'LOW',
+      action: 'Wait, plan only',
+      description: 'Low conviction - monitor for improvement'
     };
   }
 }
@@ -20071,11 +20193,100 @@ async function runAnalysis(){
     console.error('Score validation error:', e);
   }
 
+  // ========== BLUEPRINT FORECAST & PENDING PLAN GENERATION (Points 21-27, 33-34, 36, 46) ==========
+  try{
+    // Compute structured scores
+    const structScore = computeStructureScore(base, STATE.htfHistory, STATE.interval);
+    const liqScore = computeLiquidityScore(base, STATE.interval);
+    const trendScore = computeTrendFilterScore(base, STATE.interval);
+    const newsScore = computeNewsSessionScore(base, STATE.interval, fundamentals.newsBias);
+    const riskScore = computeRiskScore(base, STATE.interval);
+    
+    // Generate forecast for next interval
+    const forecast = forecastNextInterval(base, STATE.htfHistory, STATE.interval, structScore, liqScore, trendScore, newsScore, riskScore);
+    
+    // Check confirmation flag
+    STATE.confirmationFlag = checkConfirmationFlag(base, STATE.interval);
+    
+    // Get confidence category
+    const confidence = getConfidenceCategory(forecast.probability, STATE.confirmationFlag);
+    
+    // Generate pending order plan if not high confidence
+    let pendingPlan = null;
+    const recDir = String(out.recommendation||'').includes('BUY') || String(out.recommendation||'').includes('LONG') ? 1 : 
+                   (String(out.recommendation||'').includes('SELL') || String(out.recommendation||'').includes('SHORT') ? -1 : 0);
+    if(confidence.category !== 'HIGH' || !STATE.confirmationFlag){
+      pendingPlan = generatePendingOrderPlan(base, forecast, recDir || (forecast.direction === 'UP' ? 1 : -1));
+    }
+    
+    // Store forecast in output
+    out.forecast = forecast;
+    out.structuredScores = {structScore, liqScore, trendScore, newsScore, riskScore};
+    out.confidenceCategory = confidence;
+    out.pendingPlan = pendingPlan;
+    out.confirmationFlag = STATE.confirmationFlag;
+    
+    console.log('[BLUEPRINT] Forecast:', forecast.direction, `${forecast.probability.toFixed(3)}%`, `Expected: ${forecast.expectedMove.toFixed(3)}%`);
+    console.log('[BLUEPRINT] Confidence:', confidence.category, '-', confidence.action);
+    console.log('[BLUEPRINT] Confirmation Flag:', STATE.confirmationFlag ? 'PASS ✅' : 'BLOCK ❌');
+    if(pendingPlan){
+      console.log('[BLUEPRINT] Pending Plan:', pendingPlan.direction, `Entry: ${pendingPlan.entry}`, `TP1: ${pendingPlan.tp1} (1R)`);
+    }
+  }catch(e){
+    console.error('[BLUEPRINT] Forecast generation error:', e);
+  }
+
   // Display
   setText(recEl, `Recommendation: ${out.recommendation}`);
-  setText(probEl, `Probability: ${formatScore(out.probability || 0)}%`);
+  setText(probEl, `Probability: ${formatProbability(out.probability || 0)}%`);
   
-  // Display pending order details if present (like your examples)
+  // ========== BLUEPRINT FORECAST DISPLAY (Point 59, 70) ==========
+  // Communication discipline: aligned statements with forecast + recommendation + strategy + trade plan
+  if(out.forecast){
+    const f = out.forecast;
+    const conf = out.confidenceCategory;
+    const plan = out.pendingPlan;
+    
+    let forecastText = `\n\n━━━━ 🎯 NEXT INTERVAL FORECAST ━━━━\n`;
+    forecastText += `Direction: ${f.direction}\n`;
+    forecastText += `Probability: ${formatProbability(f.probability)}%\n`;
+    forecastText += `Expected Move: ${formatPercent(f.expectedMove)}%\n`;
+    forecastText += `Net Score: ${formatScore(f.netScore)}/100\n\n`;
+    forecastText += `Confidence: ${conf.category} - ${conf.action}\n`;
+    forecastText += `Confirmation Flag: ${out.confirmationFlag ? '✅ PASS' : '❌ BLOCK'}\n`;
+    
+    // Display structured scores
+    if(out.structuredScores){
+      const s = out.structuredScores;
+      forecastText += `\n━━━━ 📊 STRUCTURED SCORING ━━━━\n`;
+      forecastText += `Structure: ${formatScore(s.structScore)}/30\n`;
+      forecastText += `Liquidity: ${formatScore(s.liqScore)}/30\n`;
+      forecastText += `Trend Filter: ${formatScore(s.trendScore)}/20\n`;
+      forecastText += `News/Session: ${formatScore(s.newsScore)}/20\n`;
+      forecastText += `Risk: ${formatScore(s.riskScore)}/10 (lower is safer)\n`;
+    }
+    
+    setText(recEl, `Recommendation: ${out.recommendation}${forecastText}`);
+  }
+  
+  // Display pending plan if available (Blueprint Point 51-52 format)
+  if(out.pendingPlan){
+    const pp = out.pendingPlan;
+    let planText = `\n\n━━━━ 📋 CONDITIONAL PENDING ORDER ━━━━\n`;
+    planText += `Direction: ${pp.direction}\n`;
+    planText += `Entry: ${formatPrice(pp.entry)} (${pp.entryPOI})\n`;
+    planText += `Stop Loss: ${formatPrice(pp.stop)}\n`;
+    planText += `TP1: ${formatPrice(pp.tp1)} (1R)\n`;
+    planText += `TP2: ${formatPrice(pp.tp2)} (1.5R)\n`;
+    planText += `TP3: ${formatPrice(pp.tp3)} (2R)\n`;
+    planText += `Risk: ${formatPrice(pp.riskAmount)}\n\n`;
+    planText += `Activation: ${pp.activation}\n`;
+    
+    const current = recEl.textContent || recEl.innerHTML || '';
+    setText(recEl, current + planText);
+  }
+  
+  // Legacy pending order display (keep for compatibility)
   if(out.pendingOrder && out.recommendation && out.recommendation.includes('PENDING')){
     const po = out.pendingOrder;
     let pendingText = `\n\n━━━━ 📋 PENDING ORDER SETUP ━━━━\n`;
