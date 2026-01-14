@@ -20754,7 +20754,7 @@ async function runAnalysis(){
   }
 
   // Display
-  const base = { 
+  const displayBase = { 
     entry: out.entry, 
     stop: out.stop, 
     target: out.target,
@@ -20787,7 +20787,7 @@ async function runAnalysis(){
     }
   }
   
-  setText(recEl, buildProfessionalDisplay(out, base, plan, diagnosis, confluence, supplyDemand));
+  setText(recEl, buildProfessionalDisplay(out, displayBase, plan, diagnosis, confluence, supplyDemand));
   setText(probEl, `Probability: ${formatProbability(out.probability || 0)}%`);
   
   // ========== NEWS DISPLAY (RESTORE PROMINENCE) ==========
