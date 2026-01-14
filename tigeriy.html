@@ -1014,60 +1014,190 @@ function formatProbability(prob) {
   return num.toFixed(3);
 }
 
-function buildProfessionalDisplay(out, base, plan, diagnosis, confluence) {
+function buildProfessionalDisplay(out, base, plan, diagnosis, confluence, supplyDemand) {
   let display = '';
   
-  // Professional trade setup box
-  display += '╔════════════════════════════════════╗\n';
-  display += '║      🎯 PROFESSIONAL SETUP       ║\n';
-  display += '╚════════════════════════════════════╝\n\n';
+  // Professional header
+  display += '═══════════════════════════════════════════════════════════\n';
+  display += '                    🎯 PROFESSIONAL TRADE SETUP\n';
+  display += '═══════════════════════════════════════════════════════════\n\n';
   
-  // Timeframe confluence
-  display += '⏰ TIMEFRAME CONFLUENCE:\n';
-  if(confluence) {
+  // Asset and direction
+  const direction = out.recommendation === 'BUY' ? 'BUY SETUP' : (out.recommendation === 'SELL' ? 'SELL SETUP' : 'NO SETUP');
+  display += `📊 ${STATE.symbol} (${STATE.interval}) - ${direction}\n\n`;
+  
+  // Supply/Demand Zones - PROMINENT
+  if(supplyDemand && supplyDemand.zones && supplyDemand.zones.length > 0) {
+    display += '┌─ SUPPLY/DEMAND ZONES ───────────────────────────────────┐\n';
+    supplyDemand.zones.slice(0, 3).forEach(zone => {
+      const zoneType = zone.type === 'supply' ? '🔴 SUPPLY' : '🟢 DEMAND';
+      display += `│ ${zoneType}: ${zone.high.toFixed(2)} - ${zone.low.toFixed(2)}\n`;
+      if(zone.reaction) {
+        display += `│    └─ Reaction: ${zone.reaction}\n`;
+      }
+      if(zone.strength) {
+        display += `│    └─ Strength: ${zone.strength}\n`;
+      }
+    });
+    display += '└─────────────────────────────────────────────────────────┘\n\n';
+  }
+  
+  // Timeframe Confluence - ALIGNED SETUP
+  display += '┌─ TIMEFRAME CONFLUENCE ──────────────────────────────────┐\n';
+  if(confluence && confluence.length > 0) {
     confluence.forEach(tf => {
       const check = tf.confirm ? '✅' : '⭕';
-      display += `  ${check} ${tf.interval}: ${tf.signal}\n`;
+      display += `│ ${check} ${tf.interval}: ${tf.signal}\n`;
     });
+    const agrees = confluence.filter(tf => tf.confirm).length;
+    const total = confluence.length;
+    display += `│\n│ 🎯 CONFLUENCE: ${agrees}/${total} timeframes agree`;
+    if(agrees === total) {
+      display += ' → HIGH PROBABILITY';
+    } else if(agrees >= total/2) {
+      display += ' → MODERATE';
+    } else {
+      display += ' → LOW';
+    }
+    display += '\n';
+  } else {
+    display += '│ No multi-timeframe data available\n';
   }
-  display += '\n';
+  display += '└─────────────────────────────────────────────────────────┘\n\n';
   
-  // Entry/Stop/Target
+  // Multi-Candle Pattern Details
+  if(diagnosis && diagnosis.pattern) {
+    display += '📍 PATTERN DETECTED:\n';
+    display += `   ${diagnosis.pattern.name || diagnosis.pattern}\n`;
+    if(diagnosis.patternDetails) {
+      display += `   └─ Formation: ${diagnosis.patternDetails}\n`;
+    }
+    if(diagnosis.candleCount) {
+      display += `   └─ Candles: ${diagnosis.candleCount}-candle pattern\n`;
+    }
+    display += '\n';
+  }
+  
+  // Entry Zone with REASONS
+  if(plan || base.entry) {
+    const entry = base.entry || plan.entry;
+    display += `📍 ENTRY ZONE: ${entry}\n`;
+    if(base.entryReason || plan.entryReason) {
+      display += `   └─ Why: ${base.entryReason || plan.entryReason}\n`;
+    } else {
+      display += `   └─ Why: ${out.recommendation === 'BUY' ? 'Break above resistance' : 'Break below support'}\n`;
+    }
+    display += '\n';
+  }
+  
+  // Stop Loss with REASONS
+  if(plan || base.stop) {
+    const stop = base.stop || plan.stop;
+    const entry = parseFloat(base.entry || plan.entry);
+    const stopVal = parseFloat(stop);
+    const pips = !isNaN(entry) && !isNaN(stopVal) ? Math.abs(entry - stopVal).toFixed(2) : '?';
+    display += `🛑 STOP LOSS: ${stop} (${pips} pips)\n`;
+    if(base.stopReason || plan.stopReason) {
+      display += `   └─ Why: ${base.stopReason || plan.stopReason}\n`;
+    } else {
+      display += `   └─ Why: ${out.recommendation === 'BUY' ? 'Below demand zone (invalidates thesis)' : 'Above supply zone (invalidates thesis)'}\n`;
+    }
+    display += '\n';
+  }
+  
+  // Targets with REASONS
   if(plan) {
-    display += '📊 TRADE PLAN:\n';
-    display += `  Entry: ${base.entry || plan.entry}\n`;
-    display += `  Stop: ${base.stop || plan.stop}\n`;
-    display += `  Target: ${base.target || plan.tp1}\n\n`;
-    
-    // Risk/Reward
+    if(plan.tp1) {
+      const entry = parseFloat(base.entry || plan.entry);
+      const tp1Val = parseFloat(plan.tp1);
+      const pips1 = !isNaN(entry) && !isNaN(tp1Val) ? Math.abs(tp1Val - entry).toFixed(2) : '?';
+      display += `🎯 TARGET 1: ${plan.tp1} (${pips1} pips) ← 1R\n`;
+      if(plan.tp1Reason) {
+        display += `   └─ Why: ${plan.tp1Reason}\n`;
+      } else {
+        display += `   └─ Why: Recent swing level - first profit target\n`;
+      }
+    }
+    if(plan.tp2) {
+      const entry = parseFloat(base.entry || plan.entry);
+      const tp2Val = parseFloat(plan.tp2);
+      const pips2 = !isNaN(entry) && !isNaN(tp2Val) ? Math.abs(tp2Val - entry).toFixed(2) : '?';
+      display += `🎯 TARGET 2: ${plan.tp2} (${pips2} pips) ← 2R\n`;
+      if(plan.tp2Reason) {
+        display += `   └─ Why: ${plan.tp2Reason}\n`;
+      } else {
+        display += `   └─ Why: Major support/resistance level\n`;
+      }
+    }
+    if(plan.tp3) {
+      const entry = parseFloat(base.entry || plan.entry);
+      const tp3Val = parseFloat(plan.tp3);
+      const pips3 = !isNaN(entry) && !isNaN(tp3Val) ? Math.abs(tp3Val - entry).toFixed(2) : '?';
+      display += `🎯 TARGET 3: ${plan.tp3} (${pips3} pips) ← 3R+\n`;
+      if(plan.tp3Reason) {
+        display += `   └─ Why: ${plan.tp3Reason}\n`;
+      } else {
+        display += `   └─ Why: Extended target - psychological level\n`;
+      }
+    }
+    display += '\n';
+  }
+  
+  // Risk/Reward Analysis
+  if(plan || base.entry) {
     const entry = parseFloat(base.entry || plan.entry);
     const stop = parseFloat(base.stop || plan.stop);
-    const target = parseFloat(base.target || plan.tp1);
+    const target = parseFloat(base.target || plan.tp2 || plan.tp1);
+    
     if(!isNaN(entry) && !isNaN(stop) && !isNaN(target)) {
       const risk = Math.abs(entry - stop);
       const reward = Math.abs(target - entry);
-      const ratio = risk > 0 ? (reward / risk).toFixed(2) : 0;
-      display += `  Risk/Reward: 1:${ratio}\n\n`;
+      const ratio = risk > 0 ? (reward / risk).toFixed(1) : 0;
+      
+      display += '💰 RISK/REWARD ANALYSIS:\n';
+      display += `   Best case (TP): 1 : ${ratio}`;
+      if(parseFloat(ratio) >= 2.0) {
+        display += ' ✅ EXCELLENT\n';
+      } else if(parseFloat(ratio) >= 1.5) {
+        display += ' ✅ ACCEPTABLE\n';
+      } else {
+        display += ' ⚠️ LOW\n';
+      }
+      display += `   Worst case (SL): -${risk.toFixed(2)} pips\n\n`;
     }
   }
   
-  // Probability
-  display += `📈 PROBABILITY: ${formatProbability(out.probability || 0)}%\n`;
-  const probLevel = (out.probability || 0) >= 70 ? 'HIGH' : ((out.probability || 0) >= 50 ? 'MODERATE' : 'LOW');
-  display += `  Confidence: ${probLevel}\n\n`;
-  
-  // What You See on Chart
-  display += '👀 WHAT YOU SEE ON CHART:\n';
+  // Visible Evidence
+  display += '👁️ EVIDENCE ON CHART:\n';
   if(diagnosis && diagnosis.reasons && diagnosis.reasons.length > 0) {
     diagnosis.reasons.forEach(reason => {
-      display += `  • ${reason}\n`;
+      display += `   ├─ ${reason}\n`;
     });
+  } else {
+    display += '   ├─ Analysis complete\n';
+  }
+  display += '\n';
+  
+  // Probability
+  const prob = out.probability || 0;
+  display += `⚠️ PROBABILITY: ${formatProbability(prob)}%\n`;
+  if(confluence && confluence.length > 0) {
+    const confirms = confluence.filter(tf => tf.confirm).length;
+    display += `   └─ Based on ${confirms} timeframe confluence`;
+    if(diagnosis && diagnosis.pattern) {
+      display += ` + ${diagnosis.pattern.name || diagnosis.pattern}`;
+    }
+    display += '\n';
   }
   display += '\n';
   
   // Trade Status
-  const status = out.recommendation === 'BUY' ? 'READY ✅' : (out.recommendation === 'SELL' ? 'READY ✅' : 'AWAITING ⏳');
-  display += `📍 STATUS: ${status}`;
+  if(out.recommendation === 'BUY' || out.recommendation === 'SELL') {
+    display += '✅ READY TO TRADE\n';
+  } else {
+    display += '⏳ AWAITING SETUP\n';
+  }
+  display += '═══════════════════════════════════════════════════════════';
   
   return display;
 }
@@ -20624,8 +20754,40 @@ async function runAnalysis(){
   }
 
   // Display
-  const base = { entry: out.entry, stop: out.stop, target: out.target };
-  setText(recEl, buildProfessionalDisplay(out, base, plan, diagnosis, confluence));
+  const base = { 
+    entry: out.entry, 
+    stop: out.stop, 
+    target: out.target,
+    entryReason: 'Aggressive entry at break of structure',
+    stopReason: out.recommendation === 'BUY' ? 'Below demand zone (invalidates thesis)' : 'Above supply zone (invalidates thesis)'
+  };
+  
+  // Gather supply/demand zones if available
+  let supplyDemand = null;
+  if(ictAnalysis && ictAnalysis.zones) {
+    supplyDemand = { zones: ictAnalysis.zones };
+  } else {
+    // Create basic zones from analysis
+    supplyDemand = {
+      zones: []
+    };
+    if(out.entry && out.stop) {
+      const entryVal = parseFloat(out.entry);
+      const stopVal = parseFloat(out.stop);
+      if(!isNaN(entryVal) && !isNaN(stopVal)) {
+        const zoneType = out.recommendation === 'BUY' ? 'demand' : 'supply';
+        supplyDemand.zones.push({
+          type: zoneType,
+          high: Math.max(entryVal, stopVal),
+          low: Math.min(entryVal, stopVal),
+          reaction: out.recommendation === 'BUY' ? 'Bullish rejection' : 'Bearish rejection',
+          strength: 'Moderate'
+        });
+      }
+    }
+  }
+  
+  setText(recEl, buildProfessionalDisplay(out, base, plan, diagnosis, confluence, supplyDemand));
   setText(probEl, `Probability: ${formatProbability(out.probability || 0)}%`);
   
   // ========== NEWS DISPLAY (RESTORE PROMINENCE) ==========
