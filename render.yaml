@@ -7,4 +7,4 @@ services:
     routes:
       - type: rewrite
         source: /*
-        destination: /iytigergr.html
+        destination: /crttrade.html
