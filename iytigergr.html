@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CRT Trade — BTCUSD, ETHUSD, PAXGUSD</title>
+
+<!-- Tailwind for quick styling -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Chart.js and financial plugin -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.1.1/dist/chartjs-chart-financial.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<!-- Zoom & Pan plugin -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
+
+<style>
+  :root{ --bg:#071127; --card:#0b1220; --muted:#9fb0cc; --accent:#0f3b82; }
+  html,body{height:100%}
+  body{background:var(--bg); color:#e6eef8; font-family:Inter,system-ui,Arial; margin:0; padding:18px;}
+  .card{background:var(--card); border:1px solid #132033; padding:14px; border-radius:12px;}
+  .btn{padding:8px 12px; border-radius:8px; font-weight:600; cursor:pointer}
+  .btn-navy{background:var(--accent); color:white}
+  .btn-black{background:#0b1220;border:1px solid #1f2937;color:#e6eef8}
+  .select, .input { background:#0f1724; color:#e6eef8; padding:8px 10px; border-radius:8px; border:1px solid #263046; width:100%}
+  .small{font-size:.85rem; color:#9fb0cc}
+  .tag{background:#0f1724;padding:8px;border-radius:8px;border:1px solid #1f2a3a}
+  #chartArea{ width:14cm; height:7.6cm; margin:0 auto; }
+  canvas{ max-width:100%; height:100% !important; width:100% !important; }
+  .list-scroll{max-height:12rem; overflow:auto}
+  .muted { color:#9fb0cc; font-size:0.9rem }
+</style>
+</head>
+<body>
+  <div class="max-w-5xl mx-auto space-y-4">
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">CRT Trade — Focused (BTCUSD, ETHUSD, PAXGUSD)</h1>
+      <div class="small">CRT-only entries. 1:2 Risk/Reward. Not investment advice.</div>
+    </div>
+
+    <!-- ========== CONFIG (paste keys below) ========== -->
+    <div class="card">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div>
+          <label class="small">OpenAI API Key (paste here to enable GPT)</label>
+          <input id="openaiKey" class="input mt-2" placeholder="sk-..." />
+        </div>
+        <div>
+          <label class="small">Twitter Bearer (optional for social capture)</label>
+          <input id="twitterKey" class="input mt-2" placeholder="AAAAAAAA..." />
+        </div>
+        <div>
+          <label class="small">RSS/CORS Proxy (optional)</label>
+          <input id="corsProxy" class="input mt-2" placeholder="https://your-cors-proxy.example/ (optional)" />
+        </div>
+      </div>
+      <div class="small mt-2">
+        Paste your keys and press <strong>Apply Keys</strong>. If you don't add keys, CRT runs in deterministic mode.
+        Keys are held in memory only and are not saved to disk.
+      </div>
+      <div class="mt-3"><button id="applyKeys" class="btn btn-navy">Apply Keys</button></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="card grid grid-cols-1 lg:grid-cols-4 gap-3">
+      <div>
+        <label class="small">Symbol</label>
+        <select id="symbolSelect" class="select mt-2">
+          <option value="BTCUSDT">BTCUSD</option>
+          <option value="ETHUSDT">ETHUSD</option>
+          <option value="PAXGUSDT">PAXGUSD</option>
+        </select>
+      </div>
+      <div>
+        <label class="small">Timeframes</label>
+        <div class="input mt-2">H1 (setup) → M5 (confirmation)</div>
+      </div>
+      <div>
+        <label class="small">Chart Type</label>
+        <div class="flex gap-2 mt-2">
+          <button id="btnCandle" class="btn btn-navy">Candle</button>
+          <button id="btnLine" class="btn btn-black">Line</button>
+        </div>
+      </div>
+      <div>
+        <label class="small">CRT Scan</label>
+        <div class="flex gap-2 mt-2">
+          <button id="btnReanalyse" class="btn btn-navy">Re-scan</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="card">
+      <div class="flex items-start justify-between">
+        <div>
+          <div id="title" class="text-lg font-semibold">BTCUSD <span id="intervalText" class="small">1h</span></div>
+          <div id="liveInfo" class="small">Live price: — • Data: Binance</div>
+          <div id="candleCloseInfo" class="small">Candle closes at: —</div>
+        </div>
+      </div>
+      <div id="chartArea" class="mt-3"><canvas id="mainChart"></canvas></div>
+      <div class="mt-2 small muted">CRT-only entries. Alerts only when valid CRT is detected.</div>
+    </div>
+
+    <!-- CRT Signals -->
+    <div class="grid lg:grid-cols-2 gap-4">
+      <div class="card">
+        <h2 class="font-semibold">CRT Entry Verdict</h2>
+        <div id="crtBox" class="mt-3 tag">
+          <div id="crtStatus" class="text-xl font-bold">Status: —</div>
+          <div id="crtSide" class="small mt-1">Side: —</div>
+          <div id="crtReason" class="small mt-3">Reason: —</div>
+          <div id="crtRisk" class="small mt-2 italic">Risk/Reward: 1 : 2</div>
+          <div id="analysisSource" class="small mt-2 italic">Source: CRT (Deterministic)</div>
+        </div>
+        <div class="mt-4 grid grid-cols-1 gap-3">
+          <div class="tag small">
+            <div class="font-semibold">H1 Setup</div>
+            <div id="h1Status" class="mt-1">—</div>
+            <div id="h1Reason" class="mt-1 muted">—</div>
+          </div>
+          <div class="tag small">
+            <div class="font-semibold">M5 Confirmation</div>
+            <div id="m5Status" class="mt-1">—</div>
+            <div id="m5Reason" class="mt-1 muted">—</div>
+          </div>
+        </div>
+        <div class="mt-4 small tag">
+          <div class="font-semibold">CRT Rules (strict)</div>
+          <div class="mt-2">
+            1) H1 Candle 1 (Reference) defines CRH/CRL range.<br/>
+            2) H1 Candle 2 (Manipulation) must sweep CRH/CRL and close back inside Candle 1.<br/>
+            3) If Candle 2 closes outside range → INVALID.<br/>
+            4) M5 must sweep H1 range and close back inside (confirmation).<br/>
+            5) M5 MSS/CHoCH required after sweep for higher probability.<br/>
+            6) Entry on M5 retest of OB/FVG from reversal move.<br/>
+            7) TP1 = H1 midpoint, TP2 = opposite H1 extreme.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold">CRT Setup Details</h3>
+        <div id="crtDetails" class="small mt-2 tag">—</div>
+        <h3 class="font-semibold mt-4">Recent candles (last 12)</h3>
+        <div id="candleList" class="small mt-2 list-scroll tag">—</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ====================== CONFIG ======================
+   Same AI APIs as the original app. Binance only for data.
+   =================================================== */
+const BINANCE_REST = "https://api.binance.com/api/v3";
+const BINANCE_WS = "wss://stream.binance.com:9443/ws";
+
+/* UI elements */
+const openaiKeyInput = document.getElementById('openaiKey');
+const twitterKeyInput = document.getElementById('twitterKey');
+const corsProxyInput = document.getElementById('corsProxy');
+const applyKeysBtn = document.getElementById('applyKeys');
+const symbolSelectEl = document.getElementById('symbolSelect');
+const titleEl = document.getElementById('title');
+const intervalTextEl = document.getElementById('intervalText');
+const liveInfoEl = document.getElementById('liveInfo');
+const candleCloseInfoEl = document.getElementById('candleCloseInfo');
+const btnCandle = document.getElementById('btnCandle');
+const btnLine = document.getElementById('btnLine');
+const btnReanalyse = document.getElementById('btnReanalyse');
+const crtStatusEl = document.getElementById('crtStatus');
+const crtSideEl = document.getElementById('crtSide');
+const crtReasonEl = document.getElementById('crtReason');
+const crtDetailsEl = document.getElementById('crtDetails');
+const analysisSourceEl = document.getElementById('analysisSource');
+const candleListEl = document.getElementById('candleList');
+const h1StatusEl = document.getElementById('h1Status');
+const h1ReasonEl = document.getElementById('h1Reason');
+const m5StatusEl = document.getElementById('m5Status');
+const m5ReasonEl = document.getElementById('m5Reason');
+
+/* Runtime state */
+let RUNTIME = {
+  OPENAI_KEY: '',
+  TWITTER_KEY: '',
+  CORS_PROXY: '',
+  symbol: 'BTCUSDT',
+  interval: '5m',
+  chartType: 'candlestick',
+  history: [],
+  historyH1: [],
+  historyM5: [],
+  wsH1: null,
+  wsM5: null,
+  chart: null,
+  panWheelHandler: null,
+  analysisTimer: null,
+  countdownTimer: null
+};
+
+function setText(el, txt){ if(el) el.innerText = txt; }
+function setHTML(el, html){ if(el) el.innerHTML = html; }
+
+function intervalToMs(interval){
+  if(interval === '5m') return 5 * 60 * 1000;
+  if(interval === '1h') return 60 * 60 * 1000;
+  return 5 * 60 * 1000;
+}
+
+function formatCountdown(ms){
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const mm = String(Math.floor(total / 60)).padStart(2,'0');
+  const ss = String(total % 60).padStart(2,'0');
+  return `${mm}:${ss}`;
+}
+
+/* Fetch historical klines */
+async function fetchHistorical(symbol, interval, limit=500){
+  try{
+    const url = `${BINANCE_REST}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('Klines fetch failed: '+r.status);
+    const j = await r.json();
+    return j.map(k=>({t:k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5], closed:true}));
+  }catch(e){ console.error(e); return null; }
+}
+
+/* Draw main chart */
+function drawMainChart(updateOnly=false){
+  const ctx = document.getElementById('mainChart').getContext('2d');
+  const d = RUNTIME.history;
+  if(!d || !d.length) return;
+  const labels = d.map(x=>x.t);
+  const candlesticks = d.map(x=>({x:x.t, o:x.o, h:x.h, l:x.l, c:x.c}));
+  const lineData = d.map(x=>({x:x.t, y:x.c}));
+
+  if(RUNTIME.chart && updateOnly){
+    RUNTIME.chart.data.labels = labels;
+    RUNTIME.chart.data.datasets.forEach(ds=>{
+      if(ds.id === 'price') ds.data = (RUNTIME.chartType === 'line') ? lineData : candlesticks;
+    });
+    RUNTIME.chart.update('none');
+    return;
+  }
+
+  if(RUNTIME.chart) RUNTIME.chart.destroy();
+
+  const datasets = [
+    (RUNTIME.chartType === 'line') ? { id:'price', label:'Price', data: lineData, type:'line', borderColor:'#3b82f6', pointRadius:0, borderWidth:1.4 } :
+    { id:'price', label:'Price', data: candlesticks }
+  ];
+
+  try{
+    RUNTIME.chart = new Chart(ctx, {
+      type: (RUNTIME.chartType === 'line') ? 'line' : 'candlestick',
+      data: { labels, datasets },
+      options: {
+        maintainAspectRatio:false,
+        animation:false,
+        plugins: { legend:{ labels:{ color:'#cfe6ff' } } },
+        parsing: false,
+        plugins: {
+          legend: { labels: { color:'#cfe6ff' } },
+          zoom: {
+            pan: { enabled: true, mode: 'x' },
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              mode: 'x'
+            }
+          }
+        },
+        scales: {
+          x: { type:'time', ticks:{ color:'#9fb0cc' } },
+          y: { position:'right', ticks:{ color:'#9fb0cc' }, grid:{ color:'#122033' } }
+        }
+      }
+    });
+    attachPanWheel();
+  }catch(e){
+    console.error('Chart render failed, falling back to line chart.', e);
+    RUNTIME.chartType = 'line';
+    const fallback = [{ id:'price', label:'Price', data: lineData, type:'line', borderColor:'#3b82f6', pointRadius:0, borderWidth:1.4 }];
+    RUNTIME.chart = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets: fallback },
+      options: {
+        maintainAspectRatio:false,
+        animation:false,
+        plugins: {
+          legend: { labels: { color:'#cfe6ff' } },
+          zoom: {
+            pan: { enabled: true, mode: 'x' },
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              mode: 'x'
+            }
+          }
+        },
+        parsing: false,
+        scales: {
+          x: { type:'time', ticks:{ color:'#9fb0cc' } },
+          y: { position:'right', ticks:{ color:'#9fb0cc' }, grid:{ color:'#122033' } }
+        }
+      }
+    });
+    attachPanWheel();
+  }
+}
+
+function attachPanWheel(){
+  const canvas = document.getElementById('mainChart');
+  if(!canvas || !RUNTIME.chart) return;
+  if(RUNTIME.panWheelHandler){
+    canvas.removeEventListener('wheel', RUNTIME.panWheelHandler);
+  }
+  RUNTIME.panWheelHandler = (e) => {
+    if(!RUNTIME.chart || !RUNTIME.chart.pan) return;
+    const horizontal = Math.abs(e.deltaX) > 0 ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+    if(horizontal !== 0){
+      e.preventDefault();
+      RUNTIME.chart.pan({x: -horizontal, y: 0}, undefined, 'default');
+    }
+  };
+  canvas.addEventListener('wheel', RUNTIME.panWheelHandler, { passive:false });
+}
+
+/* Websocket streaming */
+function connectWS(){
+  if(RUNTIME.wsH1){ try{ RUNTIME.wsH1.close(); }catch(e){} RUNTIME.wsH1=null; }
+  if(RUNTIME.wsM5){ try{ RUNTIME.wsM5.close(); }catch(e){} RUNTIME.wsM5=null; }
+
+  const streamH1 = `${RUNTIME.symbol.toLowerCase()}@kline_1h`;
+  const streamM5 = `${RUNTIME.symbol.toLowerCase()}@kline_5m`;
+
+  const wsH1 = new WebSocket(`${BINANCE_WS}/${streamH1}`);
+  const wsM5 = new WebSocket(`${BINANCE_WS}/${streamM5}`);
+
+  wsH1.onmessage = (evt) => {
+    try{
+      const p = JSON.parse(evt.data); const k = p.k;
+      const candle = {t:k.t, o:+k.o, h:+k.h, l:+k.l, c:+k.c, v:+k.v, closed:!!k.x};
+      const last = RUNTIME.historyH1[RUNTIME.historyH1.length-1];
+      if(last && last.t === candle.t){
+        RUNTIME.historyH1[RUNTIME.historyH1.length-1] = candle;
+      } else if(k.x){
+        RUNTIME.historyH1.push(candle);
+        if(RUNTIME.historyH1.length > 1200) RUNTIME.historyH1.shift();
+      } else {
+        RUNTIME.historyH1[RUNTIME.historyH1.length-1] = candle;
+      }
+      updateLiveAndCRT(false);
+    }catch(e){ console.error('ws parse H1', e); }
+  };
+
+  wsM5.onmessage = (evt) => {
+    try{
+      const p = JSON.parse(evt.data); const k = p.k;
+      const candle = {t:k.t, o:+k.o, h:+k.h, l:+k.l, c:+k.c, v:+k.v, closed:!!k.x};
+      const last = RUNTIME.historyM5[RUNTIME.historyM5.length-1];
+      if(last && last.t === candle.t){
+        RUNTIME.historyM5[RUNTIME.historyM5.length-1] = candle;
+      } else if(k.x){
+        RUNTIME.historyM5.push(candle);
+        if(RUNTIME.historyM5.length > 1200) RUNTIME.historyM5.shift();
+      } else {
+        RUNTIME.historyM5[RUNTIME.historyM5.length-1] = candle;
+      }
+      RUNTIME.history = RUNTIME.historyM5;
+      drawMainChart(true);
+      updateLiveAndCRT(false);
+    }catch(e){ console.error('ws parse M5', e); }
+  };
+
+  wsH1.onerror = (e)=> console.error('ws H1 error', e);
+  wsM5.onerror = (e)=> console.error('ws M5 error', e);
+  RUNTIME.wsH1 = wsH1;
+  RUNTIME.wsM5 = wsM5;
+}
+
+/* ===== CRT Logic (strict PO3) =====
+   Candle 1 (Reference): defines CRH/CRL (range).
+   Candle 2 (Manipulation): wicks beyond CRH/CRL and closes back inside Candle 1 range.
+   Candle 3 (Distribution): current candle gives LTF entry zone; LTF confirms.
+*/
+function candleBodyPct(c){
+  const range = Math.max(1e-9, c.h - c.l);
+  const body = Math.abs(c.c - c.o);
+  return body / range;
+}
+
+function detectFVG(data){
+  if(data.length < 3) return {bull:false, bear:false, detail:'No FVG data', zone:null};
+  const a = data[data.length-3];
+  const c = data[data.length-1];
+  const bull = c.l > a.h;
+  const bear = c.h < a.l;
+  let detail = 'No FVG detected';
+  let zone = null;
+  if(bull){ detail = `Bullish FVG (${a.h.toFixed(2)} → ${c.l.toFixed(2)})`; zone = {low:a.h, high:c.l}; }
+  if(bear){ detail = `Bearish FVG (${c.h.toFixed(2)} → ${a.l.toFixed(2)})`; zone = {low:c.h, high:a.l}; }
+  return {bull, bear, detail, zone};
+}
+
+function getClosed(data){
+  return (data || []).filter(c=>c.closed !== false);
+}
+
+function analyzeCRTWithData(data){
+  const closed = getClosed(data);
+  if(closed.length < 3){
+    return {status:'WAITING', side:'—', reason:'Not enough closed candles', details:[]};
+  }
+
+  const c1 = closed[closed.length-2];
+  const c2 = closed[closed.length-1];
+  const crh = c1.h;
+  const crl = c1.l;
+  const mid = (crh + crl) / 2;
+
+  const details = [];
+  details.push(`Reference Candle (C1) CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
+
+  const sweepHigh = c2.h > crh;
+  const sweepLow = c2.l < crl;
+  const closeInside = c2.c < crh && c2.c > crl;
+  const closeOutside = c2.c > crh || c2.c < crl;
+
+  if(closeOutside){
+    return {status:'INVALID CRT', side:'—', reason:'C2 closed outside C1 range (breakout, not manipulation).', details, range:{high:crh, low:crl, mid}};
+  }
+
+  if(!(sweepHigh || sweepLow)){
+    return {status:'WAITING', side:'—', reason:'No liquidity sweep beyond CRH/CRL on C2.', details, range:{high:crh, low:crl, mid}};
+  }
+
+  if(!closeInside){
+    return {status:'INVALID CRT', side:'—', reason:'C2 did not close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
+  }
+
+  const side = sweepHigh ? 'SELL' : 'BUY';
+  const reason = sweepHigh
+    ? 'Valid CRT: C2 swept above CRH and closed back inside range.'
+    : 'Valid CRT: C2 swept below CRL and closed back inside range.';
+
+  details.push('HTF focus: C1 defines range, C2 validates CRT.');
+
+  return {
+    status:'VALID CRT SETUP',
+    side,
+    reason,
+    details,
+    range: {high:crh, low:crl, mid},
+    ref: c1,
+    manip: c2
+  };
+}
+
+function detectMSS(data, side, lookback=10){
+  const closed = getClosed(data);
+  if(closed.length < lookback + 2) return {ok:false, reason:'Not enough M5 candles for MSS'};
+  const recent = closed.slice(-lookback-1, -1);
+  const last = closed[closed.length-1];
+  const swingHigh = Math.max(...recent.map(c=>c.h));
+  const swingLow = Math.min(...recent.map(c=>c.l));
+  if(side === 'BUY' && last.c > swingHigh) return {ok:true, reason:'MSS: last close broke above recent swing high.'};
+  if(side === 'SELL' && last.c < swingLow) return {ok:true, reason:'MSS: last close broke below recent swing low.'};
+  return {ok:false, reason:'No clear MSS/CHoCH on M5.'};
+}
+
+function detectOB(data, side, lookback=15){
+  const closed = getClosed(data).slice(-lookback);
+  if(closed.length < 3) return null;
+  for(let i=closed.length-2; i>=1; i--){
+    const c = closed[i];
+    const next = closed[i+1];
+    const disp = candleBodyPct(next) >= 0.6;
+    if(side === 'BUY' && c.c < c.o && next.c > next.o && disp){
+      return {type:'OB', low: Math.min(c.o, c.c), high: Math.max(c.o, c.c)};
+    }
+    if(side === 'SELL' && c.c > c.o && next.c < next.o && disp){
+      return {type:'OB', low: Math.min(c.o, c.c), high: Math.max(c.o, c.c)};
+    }
+  }
+  return null;
+}
+
+function confirmM5WithH1(m5Data, h1Signal){
+  const closed = getClosed(m5Data);
+  if(closed.length < 50) return {ok:false, reason:'Insufficient M5 data'};
+  if(!h1Signal || h1Signal.status !== 'VALID CRT SETUP' || !h1Signal.range) return {ok:false, reason:'No valid H1 setup'};
+
+  const last = closed[closed.length-1];
+  const range = h1Signal.range;
+
+  const sweepHigh = last.h > range.high;
+  const sweepLow = last.l < range.low;
+  const closeInside = last.c < range.high && last.c > range.low;
+
+  if(h1Signal.side === 'BUY' && !(sweepLow && closeInside)){
+    return {ok:false, reason:'M5 needs sweep below CRL and close back inside range.'};
+  }
+  if(h1Signal.side === 'SELL' && !(sweepHigh && closeInside)){
+    return {ok:false, reason:'M5 needs sweep above CRH and close back inside range.'};
+  }
+
+  const mss = detectMSS(closed, h1Signal.side, 10);
+  if(!mss.ok) return {ok:false, reason:mss.reason};
+
+  const fvg = detectFVG(closed);
+  const ob = detectOB(closed, h1Signal.side);
+  const zone = fvg.zone || ob;
+  if(!zone){
+    return {ok:false, reason:'No M5 FVG/OB entry zone found after reversal.'};
+  }
+
+  return {
+    ok:true,
+    reason:`M5 confirmed: sweep + close inside + MSS. Entry zone: ${zone.type || 'FVG'}.`,
+    zone,
+    sweep: last
+  };
+}
+
+function confirmM5WithH1(m5Data, h1Signal){
+  if(!m5Data || m5Data.length < 50) return {ok:false, reason:'Insufficient M5 data'};
+  if(!h1Signal || h1Signal.status !== 'VALID CRT ENTRY' || !h1Signal.range) return {ok:false, reason:'No valid H1 setup'};
+
+  const last = m5Data[m5Data.length-1];
+  const fvg = detectFVG(m5Data);
+  const disp = candleBodyPct(last) >= 0.6;
+  const inPremium = last.c > h1Signal.range.mid;
+  const inDiscount = last.c < h1Signal.range.mid;
+
+  if(h1Signal.side === 'BUY'){
+    if(inDiscount && disp && last.c > last.o && fvg.bull){
+      return {ok:true, reason:'M5 bullish displacement + bullish FVG in discount (aligned with H1 BUY).'};
+    }
+    return {ok:false, reason:'M5 confirmation missing: need bullish displacement + bullish FVG in discount.'};
+  }
+
+  if(h1Signal.side === 'SELL'){
+    if(inPremium && disp && last.c < last.o && fvg.bear){
+      return {ok:true, reason:'M5 bearish displacement + bearish FVG in premium (aligned with H1 SELL).'};
+    }
+    return {ok:false, reason:'M5 confirmation missing: need bearish displacement + bearish FVG in premium.'};
+  }
+
+  return {ok:false, reason:'No matching side for M5 confirmation.'};
+}
+
+function rrTargets(entry, sl){
+  const risk = Math.abs(entry - sl);
+  const tp = entry > sl ? (entry + (risk*2)) : (entry - (risk*2));
+  return {sl, tp};
+}
+
+function updateCRTUI(h1Crt, m5Confirm){
+  const isValid = h1Crt.status === 'VALID CRT SETUP';
+  const statusText = isValid
+    ? `Status: VALID CRT${m5Confirm.ok ? ' + M5 CONFIRMED' : ''}`
+    : `Status: ${h1Crt.status || 'WAITING'}`;
+  const sideText = isValid ? h1Crt.side : 'WAIT';
+
+  setText(crtStatusEl, statusText);
+  setText(crtSideEl, `Side: ${sideText}`);
+  setText(crtReasonEl, `Reason: ${h1Crt.reason || 'Waiting for valid CRT setup.'}`);
+  analysisSourceEl.innerText = 'Source: CRT (Deterministic)';
+
+  setText(h1StatusEl, isValid ? 'VALID CRT SETUP' : (h1Crt.status || 'WAITING'));
+  setText(h1ReasonEl, h1Crt.reason || 'Waiting for H1 setup.');
+  setText(m5StatusEl, m5Confirm.ok ? 'CONFIRMED' : (isValid ? 'NOT CONFIRMED' : 'WAITING'));
+  setText(m5ReasonEl, m5Confirm.reason || (isValid ? 'Waiting for M5 confirmation.' : 'Waiting for H1 setup.'));
+
+  if(isValid && h1Crt.range){
+    const tp1 = h1Crt.range.mid;
+    const tp2 = h1Crt.side === 'BUY' ? h1Crt.range.high : h1Crt.range.low;
+    const zone = m5Confirm.zone ? `${m5Confirm.zone.low.toFixed(2)} → ${m5Confirm.zone.high.toFixed(2)}` : 'Waiting';
+    const sl = m5Confirm.sweep
+      ? (h1Crt.side === 'BUY' ? m5Confirm.sweep.l : m5Confirm.sweep.h)
+      : null;
+
+    setHTML(crtDetailsEl,
+      `HTF Range: ${h1Crt.range.low.toFixed(2)} → ${h1Crt.range.high.toFixed(2)}<br/>`+
+      `SL: ${sl ? sl.toFixed(2) : 'Waiting'}<br/>`+
+      `TP1 (Mid): ${tp1.toFixed(2)} • TP2 (Opp Extreme): ${tp2.toFixed(2)}<br/>`+
+      `M5 Entry Zone: ${zone}`
+    );
+    if(m5Confirm.ok && m5Confirm.sweep){
+      alert(`CRT ${h1Crt.side} ENTRY on ${symbolLabel()}\nEntry Zone: ${zone}\nSL: ${sl.toFixed(2)}\nTP1: ${tp1.toFixed(2)}\nTP2: ${tp2.toFixed(2)}\nM5 Confirmed`);
+    }
+  } else {
+    setHTML(crtDetailsEl, h1Crt.details && h1Crt.details.length ? h1Crt.details.join('<br/>') : '—');
+  }
+}
+
+function symbolLabel(){
+  if(RUNTIME.symbol === 'BTCUSDT') return 'BTCUSD';
+  if(RUNTIME.symbol === 'ETHUSDT') return 'ETHUSD';
+  if(RUNTIME.symbol === 'PAXGUSDT') return 'PAXGUSD';
+  return RUNTIME.symbol;
+}
+
+async function updateLiveAndCRT(force=false){
+  const d = RUNTIME.historyM5;
+  if(!d || !d.length) return;
+  const last = d[d.length-1];
+  liveInfoEl.innerText = `Live price: ${last.c.toFixed(6)} • Last candle: ${new Date(last.t).toLocaleString()}`;
+  const closeAt = new Date(last.t + intervalToMs('5m'));
+  const remaining = closeAt.getTime() - Date.now();
+  candleCloseInfoEl.innerText = `Candle closes in: ${formatCountdown(remaining)} (at ${closeAt.toLocaleTimeString()})`;
+
+  // Recent candles
+  const recent = d.slice(-12).reverse();
+  candleListEl.innerHTML = recent.map(r=>`<div><strong>${new Date(r.t).toLocaleString()}</strong> — O:${r.o} H:${r.h} L:${r.l} C:${r.c}</div>`).join('');
+
+  const h1Crt = analyzeCRTWithData(RUNTIME.historyH1);
+  const m5Confirm = (h1Crt.status === 'VALID CRT SETUP')
+    ? confirmM5WithH1(RUNTIME.historyM5, h1Crt)
+    : {ok:false, reason:'Waiting for H1 setup.'};
+  updateCRTUI(h1Crt, m5Confirm);
+}
+
+/* ========== Event wiring ========== */
+symbolSelectEl.addEventListener('change', onSymbolChange);
+btnCandle.addEventListener('click', ()=>{ RUNTIME.chartType='candlestick'; drawMainChart(false); });
+btnLine.addEventListener('click', ()=>{ RUNTIME.chartType='line'; drawMainChart(false); });
+btnReanalyse.addEventListener('click', ()=> updateLiveAndCRT(true));
+applyKeysBtn.addEventListener('click', ()=> {
+  RUNTIME.OPENAI_KEY = openaiKeyInput.value.trim();
+  RUNTIME.TWITTER_KEY = twitterKeyInput.value.trim();
+  RUNTIME.CORS_PROXY = corsProxyInput.value.trim();
+  alert('Keys applied for this session (not saved).');
+});
+
+async function onSymbolChange(){
+  try{ if(RUNTIME.wsH1) RUNTIME.wsH1.close(); }catch(e){}
+  try{ if(RUNTIME.wsM5) RUNTIME.wsM5.close(); }catch(e){}
+  RUNTIME.symbol = symbolSelectEl.value;
+  RUNTIME.interval = '5m';
+  titleEl.innerText = `${symbolLabel()} `;
+  intervalTextEl.innerText = 'M5';
+  const h1 = await fetchHistorical(RUNTIME.symbol, '1h', 600);
+  const m5 = await fetchHistorical(RUNTIME.symbol, '5m', 600);
+  if(!h1 || !m5){ alert('Failed to fetch historical for ' + symbolLabel()); return; }
+  RUNTIME.historyH1 = h1;
+  RUNTIME.historyM5 = m5;
+  RUNTIME.history = RUNTIME.historyM5;
+  drawMainChart(false);
+  updateLiveAndCRT(false);
+  connectWS();
+  if(RUNTIME.analysisTimer) clearInterval(RUNTIME.analysisTimer);
+  RUNTIME.analysisTimer = setInterval(()=> updateLiveAndCRT(false), 30000);
+  if(RUNTIME.countdownTimer) clearInterval(RUNTIME.countdownTimer);
+  RUNTIME.countdownTimer = setInterval(()=> updateLiveAndCRT(false), 1000);
+}
+
+onSymbolChange();
+window.addEventListener('beforeunload', ()=>{
+  try{ if(RUNTIME.wsH1) RUNTIME.wsH1.close(); }catch(e){}
+  try{ if(RUNTIME.wsM5) RUNTIME.wsM5.close(); }catch(e){}
+});
+</script>
+</body>
+</html>
