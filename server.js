@@ -107,11 +107,11 @@ app.post('/api/llm', async (req,res) => {
 
 app.get('/health', (req,res)=> res.json({ ok:true, ts:Date.now() }));
 
-// Static serving of frontend (optional). Place crttrade.html in same directory.
+// Static serving of frontend (optional). Place iytigergr.html in same directory.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use(express.static(__dirname, { setHeaders: (res) => { res.set('Content-Type', 'text/html; charset=utf-8'); } }));
-app.get('/', (req,res)=> { res.set('Content-Type', 'text/html; charset=utf-8'); res.sendFile(path.join(__dirname, 'crttrade.html')); });
+app.get('/', (req,res)=> { res.set('Content-Type', 'text/html; charset=utf-8'); res.sendFile(path.join(__dirname, 'iytigergr.html')); });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, ()=> console.log('LLM proxy + static frontend listening on', PORT));

@@ -4,8 +4,6 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>CRT Trade — BTCUSD, ETHUSD, PAXGUSD</title>
-<meta http-equiv="refresh" content="0; url=crttrade.html" />
-<script>window.location.replace('crttrade.html');</script>
 
 <!-- Tailwind for quick styling -->
 <script src="https://cdn.tailwindcss.com"></script>
@@ -146,7 +144,7 @@
       <div class="card">
         <h3 class="font-semibold">CRT Setup Details</h3>
         <div id="crtDetails" class="small mt-2 tag">—</div>
-        <h3 class="font-semibold mt-4">Recent candles (last 12)</h3>
+        <h3 class="font-semibold mt-4">Recent M5 candles (last 12)</h3>
         <div id="candleList" class="small mt-2 list-scroll tag">—</div>
       </div>
     </div>
@@ -424,7 +422,8 @@ function analyzeCRTWithData(data){
   const mid = (crh + crl) / 2;
 
   const details = [];
-  details.push(`Reference Candle (C1) CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
+  details.push(`H1 C1 (Reference) @ ${new Date(c1.t).toLocaleString()} — CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
+  details.push(`H1 C2 (Manipulation) @ ${new Date(c2.t).toLocaleString()} — O:${c2.o.toFixed(2)} H:${c2.h.toFixed(2)} L:${c2.l.toFixed(2)} C:${c2.c.toFixed(2)}`);
 
   const sweepHigh = c2.h > crh;
   const sweepLow = c2.l < crl;
