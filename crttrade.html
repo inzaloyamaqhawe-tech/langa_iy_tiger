@@ -83,12 +83,7 @@
           <button id="btnLine" class="btn btn-black">Line</button>
         </div>
       </div>
-      <div>
-        <label class="small">CRT Scan</label>
-        <div class="flex gap-2 mt-2">
-          <button id="btnReanalyse" class="btn btn-navy">Re-scan</button>
-        </div>
-      </div>
+      <!-- Re-scan is now automatic every 90s for all 3 assets (manual button removed) -->
     </div>
 
     <!-- Chart -->
@@ -144,7 +139,7 @@
       <div class="card">
         <h3 class="font-semibold">CRT Setup Details</h3>
         <div id="crtDetails" class="small mt-2 tag">—</div>
-        <h3 class="font-semibold mt-4">Recent candles (last 12)</h3>
+        <h3 class="font-semibold mt-4">Recent M5 candles (last 12)</h3>
         <div id="candleList" class="small mt-2 list-scroll tag">—</div>
       </div>
     </div>
@@ -169,7 +164,7 @@ const liveInfoEl = document.getElementById('liveInfo');
 const candleCloseInfoEl = document.getElementById('candleCloseInfo');
 const btnCandle = document.getElementById('btnCandle');
 const btnLine = document.getElementById('btnLine');
-const btnReanalyse = document.getElementById('btnReanalyse');
+// const btnReanalyse = document.getElementById('btnReanalyse');
 const crtStatusEl = document.getElementById('crtStatus');
 const crtSideEl = document.getElementById('crtSide');
 const crtReasonEl = document.getElementById('crtReason');
@@ -214,6 +209,54 @@ function formatCountdown(ms){
   const mm = String(Math.floor(total / 60)).padStart(2,'0');
   const ss = String(total % 60).padStart(2,'0');
   return `${mm}:${ss}`;
+}
+
+// CRT validation thresholds (tunable)
+const CRT_IMPULSE_MIN_BODY_PCT = 0.55; // min body size as fraction of candle range
+const CRT_MAX_WICK_RATIO = 0.35; // max combined wick ratio relative to body
+const CRT_CONSOLIDATION_LOOKBACK = 6; // H1 candles before CRT to check low volatility
+const CRT_CONSOLIDATION_MAX_STD_RATIO = 0.6; // std(range)/mean(range) must be <= this
+const CRT_MIN_SWEEP_PIPS = 2; // minimum sweep beyond CRH/CRL in pips
+const CRT_MAX_AGE_MS = 24 * 60 * 60 * 1000; // consider HTF CRT invalid after 24h
+const CRT_MIDPOINT_VIOLATION_LOOKBACK = 6; // H1 candles to measure midpoint chops
+const CRT_MIDPOINT_MAX_CROSSES = 2; // max allowed midpoint crosses before invalid
+
+function topWickPct(c){ const bodyTop = Math.max(c.o, c.c); return (c.h - bodyTop) / (Math.max(1e-9, c.h - c.l)); }
+function bottomWickPct(c){ const bodyBot = Math.min(c.o, c.c); return (bodyBot - c.l) / (Math.max(1e-9, c.h - c.l)); }
+
+function isCleanImpulse(c){
+  if(!c) return false;
+  const bodyPct = candleBodyPct(c);
+  const top = topWickPct(c); const bot = bottomWickPct(c);
+  const wickRatio = top + bot;
+  return bodyPct >= CRT_IMPULSE_MIN_BODY_PCT && wickRatio <= CRT_MAX_WICK_RATIO;
+}
+
+function consolidationBefore(data, idxRef){
+  const closed = getClosed(data);
+  const idx = closed.findIndex(x=>x.t === idxRef.t);
+  if(idx <= 0) return false;
+  const start = Math.max(0, idx - CRT_CONSOLIDATION_LOOKBACK);
+  const slice = closed.slice(start, idx);
+  if(slice.length < 3) return false;
+  const ranges = slice.map(c=>c.h - c.l);
+  const mean = ranges.reduce((a,b)=>a+b,0)/ranges.length;
+  const variance = ranges.reduce((a,b)=>a+Math.pow(b-mean,2),0)/ranges.length;
+  const std = Math.sqrt(variance);
+  return (std / Math.max(1e-9, mean)) <= CRT_CONSOLIDATION_MAX_STD_RATIO;
+}
+
+function midpointCrosses(closed, mid){
+  let crosses = 0;
+  for(let i = Math.max(0, closed.length - CRT_MIDPOINT_VIOLATION_LOOKBACK); i < closed.length; i++){
+    const c = closed[i];
+    const prev = closed[i-1];
+    if(!prev) continue;
+    const prevSide = prev.c >= mid ? 1 : -1;
+    const curSide = c.c >= mid ? 1 : -1;
+    if(prevSide !== curSide) crosses++;
+  }
+  return crosses;
 }
 
 /* Fetch historical klines */
@@ -386,30 +429,8 @@ function connectWS(){
    Candle 2 (Manipulation): wicks beyond CRH/CRL and closes back inside Candle 1 range.
    Candle 3 (Distribution): current candle gives LTF entry zone; LTF confirms.
 */
-function candleBodyPct(c){
-  const range = Math.max(1e-9, c.h - c.l);
-  const body = Math.abs(c.c - c.o);
-  return body / range;
-}
-
-function detectFVG(data){
-  if(data.length < 3) return {bull:false, bear:false, detail:'No FVG data', zone:null};
-  const a = data[data.length-3];
-  const c = data[data.length-1];
-  const bull = c.l > a.h;
-  const bear = c.h < a.l;
-  let detail = 'No FVG detected';
-  let zone = null;
-  if(bull){ detail = `Bullish FVG (${a.h.toFixed(2)} → ${c.l.toFixed(2)})`; zone = {low:a.h, high:c.l}; }
-  if(bear){ detail = `Bearish FVG (${c.h.toFixed(2)} → ${a.l.toFixed(2)})`; zone = {low:c.h, high:a.l}; }
-  return {bull, bear, detail, zone};
-}
-
-function getClosed(data){
-  return (data || []).filter(c=>c.closed !== false);
-}
-
-function analyzeCRTWithData(data){
+function analyzeCRTWithData(data, symbol){
+  symbol = symbol || RUNTIME.symbol;
   const closed = getClosed(data);
   if(closed.length < 3){
     return {status:'WAITING', side:'—', reason:'Not enough closed candles', details:[]};
@@ -421,13 +442,29 @@ function analyzeCRTWithData(data){
   const crl = c1.l;
   const mid = (crh + crl) / 2;
 
-  const details = [];
-  details.push(`Reference Candle (C1) CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
+  // age check
+  if(Date.now() - c1.t > CRT_MAX_AGE_MS) return {status:'WAITING', side:'—', reason:'H1 CRT too old', details:[]};
 
-  const sweepHigh = c2.h > crh;
-  const sweepLow = c2.l < crl;
+  const details = [];
+  details.push(`H1 C1 (Reference) @ ${new Date(c1.t).toLocaleString()} — CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
+  details.push(`H1 C2 (Manipulation) @ ${new Date(c2.t).toLocaleString()} — O:${c2.o.toFixed(2)} H:${c2.h.toFixed(2)} L:${c2.l.toFixed(2)} C:${c2.c.toFixed(2)}`);
+
+  // ensure C1 is a clean impulse candle and follows consolidation
+  if(!isCleanImpulse(c1)) return {status:'INVALID CRT', side:'—', reason:'C1 not a clean impulse candle', details, range:{high:crh, low:crl, mid}};
+  if(!consolidationBefore(data, c1)) return {status:'INVALID CRT', side:'—', reason:'No consolidation/compression before C1', details, range:{high:crh, low:crl, mid}};
+
+  // require sweep magnitude
+  const pip = getPipSize(symbol);
+  const minSweep = Math.max(1, CRT_MIN_SWEEP_PIPS * pip);
+  const sweepHigh = (c2.h - crh) >= minSweep;
+  const sweepLow = (crl - c2.l) >= minSweep;
   const closeInside = c2.c < crh && c2.c > crl;
   const closeOutside = c2.c > crh || c2.c < crl;
+  details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
+
+  if(sweepHigh && sweepLow){
+    return {status:'INVALID CRT', side:'—', reason:'C2 swept both CRH and CRL (ambiguous).', details, range:{high:crh, low:crl, mid}};
+  }
 
   if(closeOutside){
     return {status:'INVALID CRT', side:'—', reason:'C2 closed outside C1 range (breakout, not manipulation).', details, range:{high:crh, low:crl, mid}};
@@ -440,6 +477,30 @@ function analyzeCRTWithData(data){
   if(!closeInside){
     return {status:'INVALID CRT', side:'—', reason:'C2 did not close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
   }
+
+  // midpoint chops detection
+  const crosses = midpointCrosses(closed, mid);
+  if(crosses > CRT_MIDPOINT_MAX_CROSSES){
+    return {status:'INVALID CRT', side:'—', reason:'Midpoint violated/repeatedly crossed — CRT unstable.', details, range:{high:crh, low:crl, mid}};
+  }
+
+  const side = sweepHigh ? 'SELL' : 'BUY';
+  const reason = sweepHigh
+    ? 'Valid CRT: C2 swept above CRH and closed back inside range.'
+    : 'Valid CRT: C2 swept below CRL and closed back inside range.';
+
+  details.push('HTF focus: C1 defines range, C2 validates CRT.');
+
+  return {
+    status:'VALID CRT SETUP',
+    side,
+    reason,
+    details,
+    range: {high:crh, low:crl, mid},
+    ref: c1,
+    manip: c2
+  };
+}
 
   const side = sweepHigh ? 'SELL' : 'BUY';
   const reason = sweepHigh
@@ -590,7 +651,7 @@ async function updateLiveAndCRT(force=false){
   const recent = d.slice(-12).reverse();
   candleListEl.innerHTML = recent.map(r=>`<div><strong>${new Date(r.t).toLocaleString()}</strong> — O:${r.o} H:${r.h} L:${r.l} C:${r.c}</div>`).join('');
 
-  const h1Crt = analyzeCRTWithData(RUNTIME.historyH1);
+  const h1Crt = analyzeCRTWithData(RUNTIME.historyH1, RUNTIME.symbol);
   const m5Confirm = (h1Crt.status === 'VALID CRT SETUP')
     ? confirmM5WithH1(RUNTIME.historyM5, h1Crt)
     : {ok:false, reason:'Waiting for H1 setup.'};
@@ -601,7 +662,7 @@ async function updateLiveAndCRT(force=false){
 symbolSelectEl.addEventListener('change', onSymbolChange);
 btnCandle.addEventListener('click', ()=>{ RUNTIME.chartType='candlestick'; drawMainChart(false); });
 btnLine.addEventListener('click', ()=>{ RUNTIME.chartType='line'; drawMainChart(false); });
-btnReanalyse.addEventListener('click', ()=> updateLiveAndCRT(true));
+// Manual re-scan removed. Scanning is automatic for all assets (see scanAllSymbols below).
 applyKeysBtn.addEventListener('click', ()=> {
   RUNTIME.OPENAI_KEY = openaiKeyInput.value.trim();
   RUNTIME.TWITTER_KEY = twitterKeyInput.value.trim();
@@ -636,6 +697,61 @@ window.addEventListener('beforeunload', ()=>{
   try{ if(RUNTIME.wsH1) RUNTIME.wsH1.close(); }catch(e){}
   try{ if(RUNTIME.wsM5) RUNTIME.wsM5.close(); }catch(e){}
 });
+
+/* ====================== Automatic multi-asset scanner ======================
+   Runs every 90 seconds across BTCUSDT, ETHUSDT, PAXGUSDT and notifies user
+   when a valid CRT + M5 confirmation is detected. Uses Notification API and
+   falls back to alert() if permissions are not granted.
+*/
+
+const WATCH_SYMBOLS = ['BTCUSDT','ETHUSDT','PAXGUSDT'];
+let scannerTimer = null;
+
+async function scanSymbolOnce(symbol){
+  try{
+    const h1 = await fetchHistorical(symbol, '1h', 600);
+    const m5 = await fetchHistorical(symbol, '5m', 600);
+    if(!h1 || !m5) return null;
+    const h1Crt = analyzeCRTWithData(h1, symbol);
+    const m5Confirm = (h1Crt.status === 'VALID CRT SETUP') ? confirmM5WithH1(m5, h1Crt) : {ok:false};
+    return {symbol, h1Crt, m5Confirm};
+  }catch(e){ console.error('scanSymbolOnce error', e); return null; }
+}
+
+function notifyUserForSignal(symbol, h1Crt, m5Confirm){
+  const label = symbol === 'BTCUSDT' ? 'BTCUSD' : symbol === 'ETHUSDT' ? 'ETHUSD' : 'PAXGUSD';
+  const title = `CRT Alert — ${label} — ${h1Crt.side}`;
+  const body = `${h1Crt.reason}\nM5: ${m5Confirm.ok ? 'Confirmed' : 'Not Confirmed'}`;
+  if(window.Notification && Notification.permission === 'granted'){
+    new Notification(title, { body });
+  } else {
+    alert(`${title}\n${body}`);
+  }
+}
+
+async function scanAllSymbols(){
+  for(const s of WATCH_SYMBOLS){
+    const res = await scanSymbolOnce(s);
+    if(res && res.h1Crt && res.h1Crt.status === 'VALID CRT SETUP' && res.m5Confirm && res.m5Confirm.ok){
+      notifyUserForSignal(s, res.h1Crt, res.m5Confirm);
+    }
+  }
+}
+
+function startScanner(){
+  if(scannerTimer) clearInterval(scannerTimer);
+  // Run immediately, then every 90s
+  scanAllSymbols();
+  scannerTimer = setInterval(scanAllSymbols, 90 * 1000);
+}
+
+// Request notification permission up front (user can grant)
+if(window.Notification && Notification.permission !== 'granted' && Notification.permission !== 'denied'){
+  Notification.requestPermission().then(p=>{ if(p==='granted') console.log('Notifications granted'); });
+}
+
+// Start automatic scanner
+startScanner();
 </script>
 </body>
 </html>
