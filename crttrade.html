@@ -502,23 +502,6 @@ function analyzeCRTWithData(data, symbol){
   };
 }
 
-  const side = sweepHigh ? 'SELL' : 'BUY';
-  const reason = sweepHigh
-    ? 'Valid CRT: C2 swept above CRH and closed back inside range.'
-    : 'Valid CRT: C2 swept below CRL and closed back inside range.';
-
-  details.push('HTF focus: C1 defines range, C2 validates CRT.');
-
-  return {
-    status:'VALID CRT SETUP',
-    side,
-    reason,
-    details,
-    range: {high:crh, low:crl, mid},
-    ref: c1,
-    manip: c2
-  };
-}
 
 function detectMSS(data, side, lookback=10){
   const closed = getClosed(data);
