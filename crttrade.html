@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>CRT Trade — BTCUSD, ETHUSD, PAXGUSD</title>
+<title>Langa CRT Trade — GOLD</title>
 
 <!-- Tailwind for quick styling -->
 <script src="https://cdn.tailwindcss.com"></script>
@@ -72,16 +72,6 @@
                 <div class="kpi-value" id="paxgOutlook">—</div>
                 <div class="mt-2 badge-sell" id="paxgBadge">SELL</div>
               </div>
-              <div class="light-card" id="cardBTC">
-                <div class="kpi-label">BTC</div>
-                <div class="kpi-value" id="btcOutlook">—</div>
-                <div class="mt-2 badge-buy" id="btcBadge">BUY</div>
-              </div>
-              <div class="light-card" id="cardETH">
-                <div class="kpi-label">ETH</div>
-                <div class="kpi-value" id="ethOutlook">—</div>
-                <div class="mt-2 badge-buy" id="ethBadge">BUY</div>
-              </div>
             </div>
             <div class="mt-4">Success Rate: <span id="successRate">0%</span></div>
 
@@ -93,7 +83,7 @@
         </div>
         <div id="viewCRT" class="card" style="display:none">
           <div class="flex items-center justify-between">
-            <h1 class="text-2xl font-bold">CRT Trade — Focused (BTCUSD, ETHUSD, PAXGUSD)</h1>
+            <h1 class="text-2xl font-bold">CRT Trade — Focused (PAXGUSD only)</h1>
             <div class="small">CRT-only entries. 1:2 Risk/Reward. Not investment advice.</div>
           </div>
 
@@ -124,8 +114,6 @@
             <div>
               <label class="small">Symbol</label>
               <select id="symbolSelect_view" class="select mt-2">
-                <option value="BTCUSDT">BTCUSD</option>
-                <option value="ETHUSDT">ETHUSD</option>
                 <option value="PAXGUSDT">PAXGUSD</option>
               </select>
             </div>
@@ -152,7 +140,7 @@
           <div class="card mt-3">
             <div class="flex items-start justify-between">
               <div>
-                <div id="title_view" class="text-lg font-semibold">BTCUSD <span id="intervalText_view" class="small">1h</span></div>
+                <div id="title_view" class="text-lg font-semibold">PAXGUSD <span id="intervalText_view" class="small">1h</span></div>
                 <div id="liveInfo_view" class="small">Live price: — • Data: Binance</div>
                 <div id="candleCloseInfo_view" class="small">Candle closes at: —</div>
               </div>
@@ -248,7 +236,7 @@ let RUNTIME = {
   OPENAI_KEY: '',
   TWITTER_KEY: '',
   CORS_PROXY: '',
-  symbol: 'BTCUSDT',
+  symbol: 'PAXGUSDT',
   interval: '5m',
   chartType: 'candlestick',
   history: [],
@@ -285,14 +273,14 @@ function intervalToMs(interval){
 }
 
 function getPipSize(symbol){
-  const map = { BTCUSDT: 10, ETHUSDT: 1, PAXGUSDT: 1 };
+  const map = { PAXGUSDT: 1 };
   return map[symbol] || 1;
 }
 
 // Fixed SL rules per symbol (absolute points)
 function getFixedSL(symbol, entry, side){
-  const buyMap = { PAXGUSDT: 25, BTCUSDT: 800, ETHUSDT: 55 };
-  const sellMap = { PAXGUSDT: 25, BTCUSDT: 800, ETHUSDT: 50 };
+  const buyMap = { PAXGUSDT: 25 };
+  const sellMap = { PAXGUSDT: 25 };
   const delta = (side === 'BUY') ? (buyMap[symbol] || 1) : (sellMap[symbol] || 1);
   if(side === 'BUY') return +(entry - delta);
   return +(entry + delta);
@@ -795,7 +783,7 @@ function updateCRTUI(h1Crt, m5Confirm){
     tp1 = applyMinPips(entry, tp1, 20, h1Crt.side, symbol);
     tp2 = applyMinPips(entry, tp2, 40, h1Crt.side, symbol);
 
-    // Symbol-specific multiple TP bands
+    // Symbol-specific multiple TP bands (system restricted to PAXGUSDT)
     let tp3 = null, tp4 = null, tp5 = null, tp6 = null;
     if(symbol === 'PAXGUSDT'){
       if(h1Crt.side === 'BUY'){
@@ -810,40 +798,6 @@ function updateCRTUI(h1Crt, m5Confirm){
         tp3 = +(entry - 15).toFixed(2);
         tp4 = +(entry - 20).toFixed(2);
         tp5 = +(entry - 30).toFixed(2);
-      }
-      const tp6Raw = getLiquidityTarget(RUNTIME.historyH1, h1Crt.side, 50);
-      tp6 = (tp6Raw && (h1Crt.side === 'BUY' ? tp6Raw > tp5 : tp6Raw < tp5)) ? tp6Raw : null;
-    } else if(symbol === 'BTCUSDT'){
-      // BTC specific ladder (absolute deltas)
-      if(h1Crt.side === 'BUY'){
-        tp1 = +(entry + 300).toFixed(2);
-        tp2 = +(entry + 470).toFixed(2);
-        tp3 = +(entry + 590).toFixed(2);
-        tp4 = +(entry + 720).toFixed(2);
-        tp5 = +(entry + 800).toFixed(2);
-      } else {
-        tp1 = +(entry - 300).toFixed(2);
-        tp2 = +(entry - 470).toFixed(2);
-        tp3 = +(entry - 590).toFixed(2);
-        tp4 = +(entry - 720).toFixed(2);
-        tp5 = +(entry - 800).toFixed(2);
-      }
-      const tp6Raw = getLiquidityTarget(RUNTIME.historyH1, h1Crt.side, 50);
-      tp6 = (tp6Raw && (h1Crt.side === 'BUY' ? tp6Raw > tp5 : tp6Raw < tp5)) ? tp6Raw : null;
-    } else if(symbol === 'ETHUSDT'){
-      // ETH specific ladder (absolute deltas)
-      if(h1Crt.side === 'BUY'){
-        tp1 = +(entry + 15).toFixed(2);
-        tp2 = +(entry + 30).toFixed(2);
-        tp3 = +(entry + 45).toFixed(2);
-        tp4 = +(entry + 60).toFixed(2);
-        tp5 = +(entry + 75).toFixed(2);
-      } else {
-        tp1 = +(entry - 15).toFixed(2);
-        tp2 = +(entry - 30).toFixed(2);
-        tp3 = +(entry - 45).toFixed(2);
-        tp4 = +(entry - 60).toFixed(2);
-        tp5 = +(entry - 75).toFixed(2);
       }
       const tp6Raw = getLiquidityTarget(RUNTIME.historyH1, h1Crt.side, 50);
       tp6 = (tp6Raw && (h1Crt.side === 'BUY' ? tp6Raw > tp5 : tp6Raw < tp5)) ? tp6Raw : null;
@@ -936,17 +890,11 @@ function updateCRTUI(h1Crt, m5Confirm){
 }
 
 function symbolLabel(){
-  if(RUNTIME.symbol === 'BTCUSDT') return 'BTCUSD';
-  if(RUNTIME.symbol === 'ETHUSDT') return 'ETHUSD';
-  if(RUNTIME.symbol === 'PAXGUSDT') return 'PAXGUSD';
-  return RUNTIME.symbol;
+  return 'PAXGUSD';
 }
 
 function getLabelFor(sym){
-  if(sym === 'BTCUSDT') return 'BTCUSD';
-  if(sym === 'ETHUSDT') return 'ETHUSD';
-  if(sym === 'PAXGUSDT') return 'PAXGUSD';
-  return sym;
+  return 'PAXGUSD';
 }
 
 async function updateLiveAndCRT(force=false){
@@ -1474,7 +1422,7 @@ function isSignalTooLate(currentPrice, tp1, tp2, side){
 }
 
 async function checkAllAssetsSignals(){
-  const symbols = ['BTCUSDT','ETHUSDT','PAXGUSDT'];
+  const symbols = ['PAXGUSDT'];
   const results = await Promise.all(symbols.map(async (symbol) => {
     const h1 = await fetchHistorical(symbol, '1h', 300);
     const m5 = await fetchHistorical(symbol, '5m', 300);
@@ -1490,39 +1438,23 @@ async function checkAllAssetsSignals(){
     tp1 = applyMinPips(entry, tp1, 20, h1Crt.side, symbol);
     tp2 = applyMinPips(entry, tp2, 40, h1Crt.side, symbol);
     const tp3Raw = getLiquidityTarget(h1, h1Crt.side, 50);
-    // Symbol-specific TP ladder
+    // Symbol-specific TP ladder (restricted to PAXGUSDT)
     let tp3 = null, tp4 = null, tp5 = null, tp6 = null;
     if(symbol === 'PAXGUSDT'){
       if(h1Crt.side === 'BUY'){
-        tp1 = +(entry + 4).toFixed(2);
+        tp1 = +(entry + 5).toFixed(2);
         tp2 = +(entry + 10).toFixed(2);
         tp3 = +(entry + 15).toFixed(2);
         tp4 = +(entry + 20).toFixed(2);
-        tp5 = +(entry + 30).toFixed(2);
+        tp5 = +(entry + 25).toFixed(2);
       } else {
-        tp1 = +(entry - 4).toFixed(2);
+        tp1 = +(entry - 5).toFixed(2);
         tp2 = +(entry - 10).toFixed(2);
         tp3 = +(entry - 15).toFixed(2);
         tp4 = +(entry - 20).toFixed(2);
-        tp5 = +(entry - 30).toFixed(2);
+        tp5 = +(entry - 25).toFixed(2);
       }
       const tp6Raw = tp3Raw;
-      tp6 = (tp6Raw && (h1Crt.side === 'BUY' ? tp6Raw > tp5 : tp6Raw < tp5)) ? tp6Raw : null;
-    } else if(symbol === 'BTCUSDT'){
-      if(h1Crt.side === 'BUY'){
-        tp1 = +(entry + 300).toFixed(2);
-        tp2 = +(entry + 470).toFixed(2);
-        tp3 = +(entry + 590).toFixed(2);
-        tp4 = +(entry + 720).toFixed(2);
-        tp5 = +(entry + 800).toFixed(2);
-      } else {
-        tp1 = +(entry - 300).toFixed(2);
-        tp2 = +(entry - 470).toFixed(2);
-        tp3 = +(entry - 590).toFixed(2);
-        tp4 = +(entry - 720).toFixed(2);
-        tp5 = +(entry - 800).toFixed(2);
-      }
-      const tp6Raw = getLiquidityTarget(h1, h1Crt.side, 50);
       tp6 = (tp6Raw && (h1Crt.side === 'BUY' ? tp6Raw > tp5 : tp6Raw < tp5)) ? tp6Raw : null;
     } else {
       tp3 = (tp3Raw && (h1Crt.side === 'BUY' ? tp3Raw > tp2 : tp3Raw < tp2)) ? tp3Raw : null;
@@ -1763,9 +1695,9 @@ function confirmH1WithD1(h1Data, d1Signal){
 }
 
 async function refreshDailyOutlooks(){
-  const symbols = ['PAXGUSDT','BTCUSDT','ETHUSDT'];
-  const idMap = { PAXGUSDT:'paxgOutlook', BTCUSDT:'btcOutlook', ETHUSDT:'ethOutlook' };
-  const idBadgeMap = { PAXGUSDT:'paxgBadge', BTCUSDT:'btcBadge', ETHUSDT:'ethBadge' };
+  const symbols = ['PAXGUSDT'];
+  const idMap = { PAXGUSDT:'paxgOutlook' };
+  const idBadgeMap = { PAXGUSDT:'paxgBadge' };
   function badgeForSide(side){
     const st = (side||'').toString().toUpperCase();
     if(st === 'BUY') return `<span class="px-3 py-1 rounded-full text-white bg-green-600">BUY</span>`;
