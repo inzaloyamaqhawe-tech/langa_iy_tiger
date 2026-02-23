@@ -620,9 +620,13 @@ function analyzeCRTWithData(data){
     else { sweepLow = true; sweepHigh = false; }
   }
 
-  // compute checks (closeInside is mandatory)
+  // compute checks (closeInside is mandatory). Treat doji C1/C2 as permissive.
   const checks = [];
-  const impulseOk = isCleanImpulse(c1);
+  const c1BodyPct = candleBodyPct(c1);
+  const c2BodyPct = candleBodyPct(c2);
+  const isDojiC1 = c1BodyPct < 0.12;
+  const isDojiC2 = c2BodyPct < 0.12;
+  const impulseOk = isCleanImpulse(c1) || isDojiC1 || isDojiC2;
   const compressionOk = precededByCompression(closed);
   const sweepOk = (sweepHigh || sweepLow);
   const crosses = countMidpointCrosses(closed, mid, 12);
@@ -640,7 +644,14 @@ function analyzeCRTWithData(data){
     return {status:'INVALID CRT', side:'—', reason:'C2 did not close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
   }
   if(pct < 0.6){
-    return {status:'WAITING', side:'—', reason:`CRT checks insufficient (${passed}/${total}).`, details, range:{high:crh, low:crl, mid}};
+    // If the only failing check is impulse but one of C1/C2 is a doji,
+    // allow the CRT to pass (treat doji as permissive). Otherwise remain WAITING.
+    const failing = checks.map((v,i)=>({ok:!!v, idx:i})).filter(x=>!x.ok).length;
+    const onlyImpulseFailed = (!impulseOk && (checks[1] || checks[2] || checks[3] || checks[4]));
+    if(!(onlyImpulseFailed && (isDojiC1 || isDojiC2))){
+      return {status:'WAITING', side:'—', reason:`CRT checks insufficient (${passed}/${total}).`, details, range:{high:crh, low:crl, mid}};
+    }
+    // else continue and accept CRT because of doji permissive rule
   }
 
   const side = sweepHigh ? 'SELL' : 'BUY';
@@ -1006,9 +1017,11 @@ function normalizeSetupsArray(arr){
 
 function saveSetups(list){
   const normalized = normalizeSetupsArray(list || []);
+  // store newest-first (by recordedTs or entryTs)
+  normalized.sort((a,b)=> (b.recordedTs||b.entryTs||0) - (a.recordedTs||a.entryTs||0));
   localStorage.setItem(SETUP_STORAGE_KEY, JSON.stringify(normalized));
 }
-function loadSetups(){ try{ const raw = JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || '[]'); return normalizeSetupsArray(Array.isArray(raw)?raw:[]); }catch(e){ return []; } }
+function loadSetups(){ try{ const raw = JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || '[]'); const normalized = normalizeSetupsArray(Array.isArray(raw)?raw:[]); normalized.sort((a,b)=> (b.recordedTs||b.entryTs||0) - (a.recordedTs||a.entryTs||0)); return normalized; }catch(e){ return []; } }
 
 function getCanonicalId(s){
   if(!s) return null;
@@ -1612,9 +1625,13 @@ async function computeDailyOutlook(symbol){
     const d1Crt = analyzeCRTWithData(d1);
     if(d1Crt.status !== 'VALID CRT SETUP') return 'DAY: WAITING';
     const m15Confirm = confirmM15WithD1(m15, d1Crt);
-    if(!m15Confirm.ok) return 'DAY: WAITING';
-    // return object with entry so UI can show target
-    return { status: `DAY: ${d1Crt.side}`, entry: m15Confirm.entry, side: d1Crt.side };
+    // suggested D1-level target (highest high for BUY, lowest low for SELL)
+    const suggestedTarget = (d1Crt.side === 'BUY') ? d1Crt.range.high : d1Crt.range.low;
+    if(m15Confirm.ok){
+      return { status: d1Crt.side, entry: (m15Confirm.entry || suggestedTarget), target: suggestedTarget, side: d1Crt.side };
+    }
+    // D1 is valid but LTF (M15) did not confirm yet — still show BUY/SELL with D1 target
+    return { status: d1Crt.side, entry: suggestedTarget, target: suggestedTarget, side: d1Crt.side, note:'UNCONFIRMED' };
   }catch(e){ return 'Error computing outlook'; }
 }
 
@@ -1712,22 +1729,32 @@ async function refreshDailyOutlooks(){
       const res = await computeDailyOutlook(sym);
       // res may be string like 'DAY: BUY' or an object. Prefer showing target when available.
       let status = 'WAITING';
-      let targetText = null;
       if(typeof res === 'string'){
         const m = res.match(/\b(BUY|SELL|WAITING)\b/i);
         status = m ? m[1].toUpperCase() : res;
       } else if(res && res.status){
-        status = res.status;
+        const m = (res.status||'').match(/\b(BUY|SELL|WAITING)\b/i);
+        status = m ? m[1].toUpperCase() : res.status;
       }
-      // if res provides entry/TP info, show target amount in KPI value
-      if(res && res.entry){ targetText = `Entry ${Number(res.entry).toFixed(2)}`; }
+      // Build clearer D1 target + entry display when available
+      let entryText = (res && res.entry) ? `Entry: ${Number(res.entry).toFixed(2)}` : null;
+      let d1TargetText = (res && res.target) ? `D1 target: ${Number(res.target).toFixed(2)}` : null;
+      if(res && res.note && d1TargetText){ d1TargetText += ` (${res.note})`; }
+
       const el = document.getElementById(idMap[sym]);
       const badgeEl = document.getElementById(idBadgeMap[sym]);
       if(el){
         if(status === 'WAITING'){
-          el.innerHTML = targetText ? `<div style="font-weight:700">${targetText}</div>` : mutedWaiting('Waiting');
+          // show muted waiting but prefer D1 target if present
+          if(d1TargetText){ el.innerHTML = `<div style="font-weight:700">${d1TargetText}</div>`; }
+          else if(entryText){ el.innerHTML = `<div style="font-weight:700">${entryText}</div>`; }
+          else { el.innerHTML = mutedWaiting('Waiting'); }
         } else {
-          el.innerHTML = targetText ? `<div style="font-weight:700">${targetText}</div>` : '';
+          // when BUY/SELL, show entry (if confirmed) and D1 target below
+          let html = '';
+          if(entryText) html += `<div style="font-weight:700">${entryText}</div>`;
+          if(d1TargetText) html += `<div class="small muted">${d1TargetText}</div>`;
+          el.innerHTML = html || '';
         }
       }
       if(badgeEl) badgeEl.innerHTML = badgeForSide(status);
