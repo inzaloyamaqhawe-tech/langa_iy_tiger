@@ -1,5 +1,5 @@
 // Unified LLM backend proxy
-// Supports provider: gemini | openai | github 
+// Supports provider: gemini | openai | github (stub)
 // IMPORTANT: GitHub Copilot models are NOT publicly exposed via a simple REST API.
 // The 'github' provider here is a placeholder returning 501 until you wire an actual endpoint.
 // Keep this server private; never expose raw API keys client-side.
@@ -9,7 +9,6 @@ import fetch from 'node-fetch';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Pool } from 'pg';
 
 const app = express();
 app.use(express.json({ limit: '20kb' }));
