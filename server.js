@@ -1,4 +1,4 @@
-﻿// Unified LLM backend proxy
+// Unified LLM backend proxy
 // Supports provider: gemini | openai | github (stub)
 // IMPORTANT: GitHub Copilot models are NOT publicly exposed via a simple REST API.
 // The 'github' provider here is a placeholder returning 501 until you wire an actual endpoint.
@@ -9,6 +9,7 @@ import fetch from 'node-fetch';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { Pool } from 'pg';
 
 const app = express();
 app.use(express.json({ limit: '20kb' }));
@@ -106,6 +107,77 @@ app.post('/api/llm', async (req,res) => {
 });
 
 app.get('/health', (req,res)=> res.json({ ok:true, ts:Date.now() }));
+
+// If DATABASE_URL is set, enable setups API backed by Postgres
+let pool = null;
+if(process.env.DATABASE_URL){
+  try{
+    pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    // simple test connect
+    pool.connect().then(c=>{ c.release(); console.log('Postgres pool connected'); }).catch(e=>{ console.warn('Postgres connect failed', e.message); pool = null; });
+  }catch(e){ console.warn('Postgres init failed', e.message); pool = null; }
+}
+
+if(pool){
+  // GET setups (limit and restrict to PAXGUSDT for frontend whitelist)
+  app.get('/api/setups', async (req,res)=>{
+    try{
+      const q = `SELECT canonical_id, symbol, setup, status, entry_ts, hit_history, created_at FROM setups WHERE upper(symbol) = 'PAXGUSDT' ORDER BY created_at DESC LIMIT 500`;
+      const r = await pool.query(q);
+      return res.json({ setups: r.rows });
+    }catch(e){ console.error('/api/setups error', e); return res.status(500).json({ error: 'db error' }); }
+  });
+
+  // POST upsert setup
+  app.post('/api/setups', async (req,res)=>{
+    try{
+      const { canonical_id, symbol, setup, status, origin, entry_ts } = req.body || {};
+      if(!canonical_id) return res.status(400).json({ error:'canonical_id required' });
+      const q = `INSERT INTO setups (canonical_id, symbol, setup, status, origin, entry_ts, created_at, updated_at)
+                 VALUES ($1,$2,$3::jsonb,$4,$5,$6, now(), now())
+                 ON CONFLICT (canonical_id) DO UPDATE SET setup = EXCLUDED.setup, status = EXCLUDED.status, origin = EXCLUDED.origin, entry_ts = EXCLUDED.entry_ts, updated_at = now()
+                 RETURNING canonical_id, symbol, setup, status, entry_ts, hit_history, created_at`;
+      const vals = [canonical_id, symbol || null, setup || {}, status || 'PENDING', origin || null, entry_ts || null];
+      const r = await pool.query(q, vals);
+      return res.json({ ok:true, row: r.rows[0] });
+    }catch(e){ console.error('POST /api/setups error', e); return res.status(500).json({ error:'db error' }); }
+  });
+
+  // PATCH update fields of a setup by canonical id
+  app.patch('/api/setups/:canonical', async (req,res)=>{
+    try{
+      const canonical = req.params.canonical;
+      const body = req.body || {};
+      const parts = [];
+      const vals = [];
+      let idx = 1;
+      if(typeof body.status !== 'undefined'){ parts.push(`status = $${idx++}`); vals.push(body.status); }
+      if(typeof body.hitHistory !== 'undefined'){ parts.push(`hit_history = $${idx++}`); vals.push(body.hitHistory); }
+      if(typeof body.setup !== 'undefined'){ parts.push(`setup = $${idx++}::jsonb`); vals.push(body.setup); }
+      if(typeof body.entry_ts !== 'undefined'){ parts.push(`entry_ts = $${idx++}`); vals.push(body.entry_ts); }
+      if(parts.length === 0) return res.status(400).json({ error:'no updatable fields' });
+      const q = `UPDATE setups SET ${parts.join(', ')}, updated_at = now() WHERE canonical_id = $${idx} RETURNING canonical_id, symbol, setup, status, entry_ts, hit_history, created_at`;
+      vals.push(canonical);
+      const r = await pool.query(q, vals);
+      if(!r.rows.length) return res.status(404).json({ error:'not found' });
+      return res.json({ ok:true, row: r.rows[0] });
+    }catch(e){ console.error('PATCH /api/setups error', e); return res.status(500).json({ error:'db error' }); }
+  });
+
+  // Admin cleanup: delete by symbol pattern (unsafe, admin-only intended)
+  app.delete('/api/admin/cleanup', async (req,res)=>{
+    try{
+      const pattern = (req.query.pattern||'').toString().toUpperCase();
+      if(!pattern) return res.status(400).json({ error:'pattern required' });
+      const q = `DELETE FROM setups WHERE upper(symbol) LIKE $1 RETURNING count(*)`;
+      const like = `%${pattern}%`;
+      await pool.query('BEGIN');
+      const r = await pool.query(`DELETE FROM setups WHERE upper(symbol) LIKE $1 RETURNING canonical_id`, [like]);
+      await pool.query('COMMIT');
+      return res.json({ ok:true, deleted: r.rows.length });
+    }catch(e){ try{ await pool.query('ROLLBACK'); }catch(_){} console.error('DELETE /api/admin/cleanup error', e); return res.status(500).json({ error:'db error' }); }
+  });
+}
 
 // Static serving of frontend (optional). Place crttrade.html in same directory.
 const __filename = fileURLToPath(import.meta.url);
