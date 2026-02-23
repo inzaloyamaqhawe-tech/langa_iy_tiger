@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --production || yarn install --production --ignore-engines || true
 COPY server.js crttrade.html ./
-# Redeploy stamp: 2026-02-23 - ensure rebuild when pushed
+# Redeploy stamp: 2026-02-23T12:00:00Z - bump to force redeploy
 EXPOSE 3000
 ENV PORT=3000
 CMD ["node", "server.js"]
