@@ -1719,6 +1719,7 @@ async function refreshDailyOutlooks(){
     const st = (side||'').toString().toUpperCase();
     if(st === 'BUY') return `<span class="px-3 py-1 rounded-full text-white bg-green-600">BUY</span>`;
     if(st === 'SELL') return `<span class="px-3 py-1 rounded-full text-white bg-red-600">SELL</span>`;
+    if(st === 'NO_CRT') return `<span class="px-3 py-1 rounded-full text-white bg-gray-600">NO CRT</span>`;
     return '';
   }
 
@@ -1727,37 +1728,45 @@ async function refreshDailyOutlooks(){
     for(const sym of symbols){
     try{
       const res = await computeDailyOutlook(sym);
-      // res may be string like 'DAY: BUY' or an object. Prefer showing target when available.
-      let status = 'WAITING';
+      // Determine explicit UI states: NO_CRT, UNCONFIRMED, or confirmed BUY/SELL
+      let uiState = 'NO_CRT';
+      let entryText = null;
+      let d1TargetText = null;
       if(typeof res === 'string'){
-        const m = res.match(/\b(BUY|SELL|WAITING)\b/i);
-        status = m ? m[1].toUpperCase() : res;
-      } else if(res && res.status){
-        const m = (res.status||'').match(/\b(BUY|SELL|WAITING)\b/i);
-        status = m ? m[1].toUpperCase() : res.status;
+        if(/WAITING|DATA ERROR|ERROR/i.test(res)){
+          uiState = 'NO_CRT';
+        } else {
+          const m = res.match(/\b(BUY|SELL)\b/i);
+          uiState = m ? m[1].toUpperCase() : 'NO_CRT';
+        }
+      } else if(res && typeof res === 'object'){
+        const m = (res.status||'').match(/\b(BUY|SELL)\b/i);
+        if(m) uiState = m[1].toUpperCase();
+        if(res.entry) entryText = `Entry: ${Number(res.entry).toFixed(2)}`;
+        if(res.target) d1TargetText = `D1 target: ${Number(res.target).toFixed(2)}`;
+        if(res.note && d1TargetText) d1TargetText += ` (${res.note})`;
+        if(m && res.note === 'UNCONFIRMED') uiState = 'UNCONFIRMED';
       }
-      // Build clearer D1 target + entry display when available
-      let entryText = (res && res.entry) ? `Entry: ${Number(res.entry).toFixed(2)}` : null;
-      let d1TargetText = (res && res.target) ? `D1 target: ${Number(res.target).toFixed(2)}` : null;
-      if(res && res.note && d1TargetText){ d1TargetText += ` (${res.note})`; }
 
       const el = document.getElementById(idMap[sym]);
       const badgeEl = document.getElementById(idBadgeMap[sym]);
       if(el){
-        if(status === 'WAITING'){
-          // show muted waiting but prefer D1 target if present
-          if(d1TargetText){ el.innerHTML = `<div style="font-weight:700">${d1TargetText}</div>`; }
-          else if(entryText){ el.innerHTML = `<div style="font-weight:700">${entryText}</div>`; }
-          else { el.innerHTML = mutedWaiting('Waiting'); }
+        if(uiState === 'NO_CRT'){
+          el.innerHTML = mutedWaiting('NO CRT');
+        } else if(uiState === 'UNCONFIRMED'){
+          el.innerHTML = d1TargetText ? `<div style="font-weight:700">${d1TargetText}</div><div class="small muted">UNCONFIRMED</div>` : `<div class="small muted">UNCONFIRMED</div>`;
         } else {
-          // when BUY/SELL, show entry (if confirmed) and D1 target below
           let html = '';
           if(entryText) html += `<div style="font-weight:700">${entryText}</div>`;
           if(d1TargetText) html += `<div class="small muted">${d1TargetText}</div>`;
           el.innerHTML = html || '';
         }
       }
-      if(badgeEl) badgeEl.innerHTML = badgeForSide(status);
+      if(badgeEl){
+        if(uiState === 'NO_CRT') badgeEl.innerHTML = badgeForSide('NO_CRT');
+        else if(uiState === 'UNCONFIRMED') badgeEl.innerHTML = `<span class="px-3 py-1 rounded-full text-white bg-yellow-600">UNCONFIRMED</span>`;
+        else badgeEl.innerHTML = badgeForSide(uiState);
+      }
     }catch(e){ console.warn('daily outlook error', e); }
   }
 }
