@@ -660,6 +660,13 @@ function analyzeCRTWithData(data){
     : 'Valid CRT: C2 swept below CRL and closed back inside range.';
 
   details.push('HTF focus: C1 defines range, C2 validates CRT.');
+  // Additional checklist for user validation
+  const clearCR = isCleanImpulse(c1) && !isDojiC1;
+  const liquiditySweep = sweepHigh || sweepLow;
+  const displacementOk = isCleanImpulse(c2) || (Math.abs(c2.c - c2.o) / Math.max(1e-9, c2.h - c2.l) > 0.45);
+  const mssOk = (()=>{ try{ const mm = detectMSS(closed, side, 12); return !!(mm && mm.ok); }catch(e){ return false; } })();
+  const fvgInfo = detectFVG(closed);
+  const fvgOk = !!(fvgInfo && fvgInfo.zone);
 
   return {
     status:'VALID CRT SETUP',
@@ -668,7 +675,15 @@ function analyzeCRTWithData(data){
     details,
     range: {high:crh, low:crl, mid},
     ref: c1,
-    manip: c2
+    manip: c2,
+    checklist: {
+      clearCR: !!clearCR,
+      liquiditySweep: !!liquiditySweep,
+      displacement: !!displacementOk,
+      mss: !!mssOk,
+      fvg: !!fvgOk,
+      premiumDiscountHint: 'Sell upper half / Buy lower half (use range mid)'
+    }
   };
 }
 
@@ -762,6 +777,63 @@ function confirmM5WithH1(m5Data, h1Signal){
   };
 }
 
+// Advanced CRT validation: narrative alignment, engineered liquidity, displacement quality,
+// structural break confirmation, efficiency (FVG) and clear liquidity target.
+function advancedValidateCRT({h1Crt, m5Confirm, h1, m5}){
+  const reasons = [];
+  if(!h1Crt || h1Crt.status !== 'VALID CRT SETUP'){
+    reasons.push('No valid HTF CRT');
+    return { ok:false, reasons };
+  }
+  // 1) Narrative alignment: quick trend estimate on H1 (avg close-open)
+  try{
+    const closed = getClosed(h1 || []).slice(-30);
+    if(closed.length >= 8){
+      const avg = closed.reduce((s,c)=>s + (c.c - c.o), 0) / closed.length;
+      const trend = avg > 0 ? 'BUY' : 'SELL';
+      if(trend !== h1Crt.side) reasons.push('Macro trend misaligned');
+    }
+  }catch(e){ /* ignore */ }
+
+  // 2) True liquidity engineering: require prior compression and engineered sweep on LTF
+  if(!precededByCompression(h1 || [], 8)) reasons.push('No prior compression (inducement)');
+  if(!(m5Confirm && m5Confirm.sweep)) reasons.push('Missing engineered sweep on LTF');
+
+  // 3) Displacement quality: require strong body and minimal overlap on sweep/confirmation
+  try{
+    if(m5Confirm && m5Confirm.sweep){
+      const s = m5Confirm.sweep; const body = Math.abs(s.c - s.o); const range = Math.max(1e-9, s.h - s.l);
+      const bodyPct = body / range;
+      if(bodyPct < 0.45) reasons.push('Weak displacement on confirmation');
+    } else {
+      reasons.push('No displacement candle detected');
+    }
+  }catch(e){}
+
+  // 4) Structural violation type / MSS: prefer external structure break
+  try{ const mss = detectMSS(m5 || [], h1Crt.side, 12); if(!(mss && mss.ok)) reasons.push('No clear MSS/CHoCH on confirmation LTF'); }catch(e){}
+
+  // 5) Efficiency: require an FVG or OB zone on the confirmation LTF
+  try{ const f = detectFVG(m5 || []); if(!(f && f.zone)) reasons.push('No clear FVG/OB on confirmation LTF'); }catch(e){}
+
+  // 6) Premium/discount fractal: check entry aligns with discount/premium per HTF range
+  try{
+    const entry = (m5Confirm && m5Confirm.entry) ? m5Confirm.entry : (h1Crt.range && h1Crt.range.mid);
+    const mid = h1Crt.range && h1Crt.range.mid;
+    if(mid && entry){
+      if(h1Crt.side === 'BUY' && entry > mid) reasons.push('Entry in premium on BUY (fractal misalignment)');
+      if(h1Crt.side === 'SELL' && entry < mid) reasons.push('Entry in discount on SELL (fractal misalignment)');
+    }
+  }catch(e){}
+
+  // 7) Liquidity target: ensure an obvious target exists (unmitigated resting stops)
+  try{ const tgt = getLiquidityTarget(h1 || [], h1Crt.side, 80); if(!tgt) reasons.push('No clear liquidity target on HTF'); }catch(e){}
+
+  // Decision rule: strict — require zero advanced invalidation reasons to pass.
+  const ok = reasons.length === 0;
+  return { ok, reasons };
+}
+
 function rrTargets(entry, sl){
   const risk = Math.abs(entry - sl);
   const tp = entry > sl ? (entry + (risk*2)) : (entry - (risk*2));
@@ -823,13 +895,25 @@ function updateCRTUI(h1Crt, m5Confirm){
     // If we already have server-authoritative HTML for this symbol, prefer it
     // and avoid overwriting it with computed values to prevent blinking.
     if(!(RUNTIME.lastServerDetailsHtml && RUNTIME.lastServerDetailsSymbol === RUNTIME.symbol)){
+      // Build checklist HTML from analyzeCRTWithData
+      const checklist = (h1Crt && h1Crt.checklist) ? h1Crt.checklist : null;
+      const checklistHtml = checklist ? (`<div style="margin-top:8px"><strong>CRT Validation Checklist</strong><div class="small muted">${checklist.premiumDiscountHint||''}</div><ul style="padding-left:16px;margin-top:6px"><li>${checklist.clearCR? '✔' : '✖'} Clear CR candle</li><li>${checklist.liquiditySweep? '✔' : '✖'} Liquidity sweep (stop raid)</li><li>${checklist.displacement? '✔' : '✖'} Displacement / strong reaction</li><li>${checklist.mss? '✔' : '✖'} Market structure shift (MSS)</li><li>${checklist.fvg? '✔' : '✖'} FVG / Imbalance (optional)</li></ul></div>`) : '';
+      // Advanced validation reasons (strict gating logic). Show if failing to explain why.
+      let advHtml = '';
+      try{
+        const adv = advancedValidateCRT({ h1Crt, m5Confirm, h1: RUNTIME.historyH1, m5: RUNTIME.historyM5 });
+        if(adv && !adv.ok && adv.reasons && adv.reasons.length){
+          advHtml = `<div style="margin-top:8px;color:#fecaca"><strong>Advanced validation failed:</strong><ul style="padding-left:16px;margin-top:6px">` + adv.reasons.map(r=>`<li>${r}</li>`).join('') + `</ul></div>`;
+        }
+      }catch(e){ /* ignore */ }
+
       setHTML(crtDetailsEl,
       `HTF Range: ${h1Crt.range.low.toFixed(2)} → ${h1Crt.range.high.toFixed(2)}<br/>`+
       `Entry (Zone Mid): ${entry.toFixed(2)}<br/>`+
       `SL: ${sl ? sl.toFixed(2) : 'Waiting'}<br/>`+
       `TP1 (>=20 pips): ${tp1.toFixed(2)} • TP2 (>=40 pips): ${tp2.toFixed(2)}<br/>`+
       `TP3: ${tp3 ? tp3.toFixed(2) : 'Waiting'} • TP4: ${tp4 ? tp4.toFixed(2) : '—'} • TP5: ${tp5 ? tp5.toFixed(2) : '—'} • TP6 (Liquidity/OB): ${tp6 ? tp6.toFixed(2) : 'Waiting'}<br/>`+
-      `M5 Entry Zone: ${zone}`
+      `M5 Entry Zone: ${zone}` + checklistHtml
       );
     }
     if(m5Confirm.ok && m5Confirm.sweep){
@@ -1520,6 +1604,11 @@ async function checkAllAssetsSignals(){
       if(typeof tp4 !== 'undefined' && tp4 !== null) setupObj.tp4 = tp4;
       if(typeof tp5 !== 'undefined' && tp5 !== null) setupObj.tp5 = tp5;
       if(typeof tp6 !== 'undefined' && tp6 !== null) setupObj.tp6 = tp6;
+      // Run advanced validation; if it fails, do NOT post or store the setup per user policy.
+      try{
+        const adv = advancedValidateCRT({ h1Crt, m5Confirm, h1, m5 });
+        if(!adv.ok){ console.warn('Advanced CRT validation failed — not recording setup', adv.reasons); return; }
+      }catch(e){ console.warn('Advanced validation error', e); }
       addSetupOnce(setupObj);
       refreshSetupViews();
     }catch(e){ console.warn('addSetupOnce failed', e); }
