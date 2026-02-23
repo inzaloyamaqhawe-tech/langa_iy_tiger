@@ -110,16 +110,18 @@ app.get('/health', (req,res)=> res.json({ ok:true, ts:Date.now() }));
 
 // If DATABASE_URL is set, enable setups API backed by Postgres
 let pool = null;
-if(process.env.DATABASE_URL){
+
+(async function initDb(){
+  if(!process.env.DATABASE_URL) return;
   try{
+    const pg = await import('pg');
+    const Pool = pg.Pool;
     pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
     // simple test connect
-    pool.connect().then(c=>{ c.release(); console.log('Postgres pool connected'); }).catch(e=>{ console.warn('Postgres connect failed', e.message); pool = null; });
-  }catch(e){ console.warn('Postgres init failed', e.message); pool = null; }
-}
+    await pool.connect().then(c=>{ c.release(); console.log('Postgres pool connected'); }).catch(e=>{ console.warn('Postgres connect failed', e.message); pool = null; });
+  }catch(e){ console.warn('Postgres init failed', e && e.message ? e.message : e); pool = null; return; }
 
-if(pool){
-  // GET setups (limit and restrict to PAXGUSDT for frontend whitelist)
+  // Register setups API routes now that pool is available
   app.get('/api/setups', async (req,res)=>{
     try{
       const q = `SELECT canonical_id, symbol, setup, status, entry_ts, hit_history, created_at FROM setups WHERE upper(symbol) = 'PAXGUSDT' ORDER BY created_at DESC LIMIT 500`;
@@ -128,7 +130,6 @@ if(pool){
     }catch(e){ console.error('/api/setups error', e); return res.status(500).json({ error: 'db error' }); }
   });
 
-  // POST upsert setup
   app.post('/api/setups', async (req,res)=>{
     try{
       const { canonical_id, symbol, setup, status, origin, entry_ts } = req.body || {};
@@ -143,7 +144,6 @@ if(pool){
     }catch(e){ console.error('POST /api/setups error', e); return res.status(500).json({ error:'db error' }); }
   });
 
-  // PATCH update fields of a setup by canonical id
   app.patch('/api/setups/:canonical', async (req,res)=>{
     try{
       const canonical = req.params.canonical;
@@ -164,12 +164,10 @@ if(pool){
     }catch(e){ console.error('PATCH /api/setups error', e); return res.status(500).json({ error:'db error' }); }
   });
 
-  // Admin cleanup: delete by symbol pattern (unsafe, admin-only intended)
   app.delete('/api/admin/cleanup', async (req,res)=>{
     try{
       const pattern = (req.query.pattern||'').toString().toUpperCase();
       if(!pattern) return res.status(400).json({ error:'pattern required' });
-      const q = `DELETE FROM setups WHERE upper(symbol) LIKE $1 RETURNING count(*)`;
       const like = `%${pattern}%`;
       await pool.query('BEGIN');
       const r = await pool.query(`DELETE FROM setups WHERE upper(symbol) LIKE $1 RETURNING canonical_id`, [like]);
@@ -177,7 +175,8 @@ if(pool){
       return res.json({ ok:true, deleted: r.rows.length });
     }catch(e){ try{ await pool.query('ROLLBACK'); }catch(_){} console.error('DELETE /api/admin/cleanup error', e); return res.status(500).json({ error:'db error' }); }
   });
-}
+
+})();
 
 // Static serving of frontend (optional). Place crttrade.html in same directory.
 const __filename = fileURLToPath(import.meta.url);
