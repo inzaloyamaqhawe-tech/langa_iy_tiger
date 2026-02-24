@@ -1,0 +1,988 @@
+[
+  {
+    "canonical_id": "PAXGUSDT|1771812000000|5179|5195|5178|5193",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771812000000|5179|5195|5178|5193",
+      "sl": 5159.735,
+      "ref": {
+        "c": 5192.85,
+        "h": 5194.81,
+        "l": 5178.27,
+        "o": 5179.02,
+        "t": 1771812000000,
+        "v": 823.5358,
+        "closed": true
+      },
+      "tp1": 5188.73,
+      "tp2": 5194.73,
+      "tp3": 5199.73,
+      "tp4": 5204.73,
+      "tp5": 5214.73,
+      "side": "BUY",
+      "entry": 5184.735,
+      "h1_ts": 1771812000000,
+      "origin": "client-12wasrlz",
+      "reason": "SL",
+      "status": "DELETED",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771819233922,
+      "hitHistory": [],
+      "recordedTs": 1771819233922,
+      "resolvedAt": 1771830000000
+    },
+    "status": "DELETED",
+    "entry_ts": "1771819233922",
+    "hit_history": [],
+    "created_at": "2026-02-23T04:00:35.016Z",
+    "updated_at": "2026-02-23T13:34:11.472Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771750800000|5133|5134|5126|5126",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771750800000|5133|5134|5126|5126",
+      "sl": 5158.33,
+      "ref": {
+        "c": 5126.39,
+        "h": 5134.17,
+        "l": 5126.25,
+        "o": 5132.63,
+        "t": 1771750800000,
+        "v": 193.8495,
+        "closed": true
+      },
+      "tp1": 5129.33,
+      "tp2": 5123.33,
+      "tp3": 5118.33,
+      "tp4": 5113.33,
+      "tp5": 5103.33,
+      "tp6": 5007.1,
+      "side": "SELL",
+      "entry": 5133.33,
+      "h1_ts": 1771750800000,
+      "origin": "client-12wasrlz",
+      "reason": "SL",
+      "status": "DELETED",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771758007112,
+      "hitHistory": [],
+      "recordedTs": 1771758007112,
+      "resolvedAt": 1771770600000
+    },
+    "status": "DELETED",
+    "entry_ts": "1771758007112",
+    "hit_history": [],
+    "created_at": "2026-02-22T11:00:07.787Z",
+    "updated_at": "2026-02-23T13:34:11.472Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771736400000|5130|5139|5130|5137",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771736400000|5130|5139|5130|5137",
+      "sl": 5163.755,
+      "ref": {
+        "c": 5137.4,
+        "h": 5138.51,
+        "l": 5129.5,
+        "o": 5129.51,
+        "t": 1771736400000,
+        "v": 276.144,
+        "closed": true
+      },
+      "tp1": 5134.76,
+      "tp2": 5128.76,
+      "tp3": 5123.76,
+      "tp4": 5118.76,
+      "tp5": 5108.76,
+      "tp6": 5007.1,
+      "side": "SELL",
+      "entry": 5138.755,
+      "h1_ts": 1771736400000,
+      "origin": "client-ohvmy18r",
+      "reason": "TP2",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771743601639,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771748700000,
+          "price": 5134.76
+        },
+        {
+          "type": "TP2",
+          "when": 1771752000000,
+          "price": 5128.76
+        }
+      ],
+      "recordedTs": 1771743601639,
+      "resolvedAt": 1771752000000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771743601639",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771748700000,
+        "price": 5134.76
+      },
+      {
+        "type": "TP2",
+        "when": 1771752000000,
+        "price": 5128.76
+      }
+    ],
+    "created_at": "2026-02-22T07:00:03.859Z",
+    "updated_at": "2026-02-22T09:23:25.589Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771664400000|5124|5125|5124|5124",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771664400000|5124|5125|5124|5124",
+      "sl": 5098.46,
+      "ref": {
+        "c": 5123.73,
+        "h": 5125,
+        "l": 5123.5,
+        "o": 5124.21,
+        "t": 1771664400000,
+        "v": 133.7433,
+        "closed": true
+      },
+      "tp1": 5127.46,
+      "tp2": 5133.46,
+      "tp3": 5138.46,
+      "tp4": 5143.46,
+      "tp5": 5153.46,
+      "side": "BUY",
+      "entry": 5123.46,
+      "h1_ts": 1771664400000,
+      "origin": "client-12wasrlz",
+      "reason": "TP5",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771671695857,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771676400000,
+          "price": 5127.46
+        },
+        {
+          "type": "TP2",
+          "when": 1771681500000,
+          "price": 5133.46
+        },
+        {
+          "type": "TP3",
+          "when": 1771683600000,
+          "price": 5138.46
+        },
+        {
+          "type": "TP4",
+          "when": 1771692600000,
+          "price": 5143.46
+        },
+        {
+          "type": "TP5",
+          "when": 1771694700000,
+          "price": 5153.46
+        }
+      ],
+      "recordedTs": 1771671695857,
+      "resolvedAt": 1771694700000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771671695857",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771676400000,
+        "price": 5127.46
+      },
+      {
+        "type": "TP2",
+        "when": 1771681500000,
+        "price": 5133.46
+      },
+      {
+        "type": "TP3",
+        "when": 1771683600000,
+        "price": 5138.46
+      },
+      {
+        "type": "TP4",
+        "when": 1771692600000,
+        "price": 5143.46
+      },
+      {
+        "type": "TP5",
+        "when": 1771694700000,
+        "price": 5153.46
+      }
+    ],
+    "created_at": "2026-02-21T11:01:36.123Z",
+    "updated_at": "2026-02-21T17:28:58.964Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771660800000|5122|5125|5122|5124",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771660800000|5122|5125|5122|5124",
+      "sl": 5097.325,
+      "ref": {
+        "c": 5124.21,
+        "h": 5125,
+        "l": 5122.15,
+        "o": 5122.15,
+        "t": 1771660800000,
+        "v": 101.0325,
+        "closed": true
+      },
+      "tp1": 5126.32,
+      "tp2": 5132.32,
+      "tp3": 5137.32,
+      "tp4": 5142.32,
+      "tp5": 5152.32,
+      "side": "BUY",
+      "entry": 5122.325,
+      "h1_ts": 1771660800000,
+      "origin": "client-12wasrlz",
+      "reason": "TP5",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771670143993,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771673700000,
+          "price": 5126.32
+        },
+        {
+          "type": "TP2",
+          "when": 1771681200000,
+          "price": 5132.32
+        },
+        {
+          "type": "TP3",
+          "when": 1771682100000,
+          "price": 5137.32
+        },
+        {
+          "type": "TP4",
+          "when": 1771684200000,
+          "price": 5142.32
+        },
+        {
+          "type": "TP5",
+          "when": 1771694700000,
+          "price": 5152.32
+        }
+      ],
+      "recordedTs": 1771670143993,
+      "resolvedAt": 1771694700000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771670143993",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771673700000,
+        "price": 5126.32
+      },
+      {
+        "type": "TP2",
+        "when": 1771681200000,
+        "price": 5132.32
+      },
+      {
+        "type": "TP3",
+        "when": 1771682100000,
+        "price": 5137.32
+      },
+      {
+        "type": "TP4",
+        "when": 1771684200000,
+        "price": 5142.32
+      },
+      {
+        "type": "TP5",
+        "when": 1771694700000,
+        "price": 5152.32
+      }
+    ],
+    "created_at": "2026-02-21T10:35:45.993Z",
+    "updated_at": "2026-02-21T17:28:59.723Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771657200000|5120|5124|5119|5122",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771657200000|5120|5124|5119|5122",
+      "sl": 5149.4349999999995,
+      "ref": {
+        "c": 5122.16,
+        "h": 5124.23,
+        "l": 5118.9,
+        "o": 5119.71,
+        "t": 1771657200000,
+        "v": 191.5117,
+        "closed": true
+      },
+      "tp1": 5120.43,
+      "tp2": 5114.43,
+      "tp3": 5109.43,
+      "tp4": 5104.43,
+      "tp5": 5094.43,
+      "tp6": 4974.58,
+      "side": "SELL",
+      "entry": 5124.4349999999995,
+      "h1_ts": 1771657200000,
+      "origin": "client-12wasrlz",
+      "reason": "SL",
+      "status": "DELETED",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771665642161,
+      "hitHistory": [],
+      "recordedTs": 1771665642161,
+      "resolvedAt": 1771694700000
+    },
+    "status": "DELETED",
+    "entry_ts": "1771665642161",
+    "hit_history": [],
+    "created_at": "2026-02-21T09:20:42.462Z",
+    "updated_at": "2026-02-23T13:34:11.472Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771632000000|5116|5121|5116|5120",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771632000000|5116|5121|5116|5120",
+      "sl": 5145.48,
+      "ref": {
+        "c": 5120.39,
+        "h": 5121.24,
+        "l": 5116.08,
+        "o": 5116.08,
+        "t": 1771632000000,
+        "v": 271.9242,
+        "closed": true
+      },
+      "tp1": 5116.48,
+      "tp2": 5110.48,
+      "tp3": 5105.48,
+      "tp4": 5100.48,
+      "tp5": 5090.48,
+      "tp6": 4966.07,
+      "side": "SELL",
+      "entry": 5120.48,
+      "h1_ts": 1771632000000,
+      "origin": "client-12wasrlz",
+      "reason": "TP1",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771639530565,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771644000000,
+          "price": 5116.48
+        }
+      ],
+      "recordedTs": 1771639530565,
+      "resolvedAt": 1771644000000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771639530565",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771644000000,
+        "price": 5116.48
+      }
+    ],
+    "created_at": "2026-02-21T02:05:31.105Z",
+    "updated_at": "2026-02-21T03:22:36.938Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771624800000|5120|5122|5110|5114",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771624800000|5120|5122|5110|5114",
+      "sl": 5090.33,
+      "ref": {
+        "c": 5113.95,
+        "h": 5121.75,
+        "l": 5109.99,
+        "o": 5120.06,
+        "t": 1771624800000,
+        "v": 479.5004,
+        "closed": true
+      },
+      "tp1": 5119.33,
+      "tp2": 5125.33,
+      "tp3": 5130.33,
+      "tp4": 5135.33,
+      "tp5": 5145.33,
+      "side": "BUY",
+      "entry": 5115.33,
+      "h1_ts": 1771624800000,
+      "origin": "client-12wasrlz",
+      "reason": "TP5",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771632328250,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771633200000,
+          "price": 5119.33
+        },
+        {
+          "type": "TP2",
+          "when": 1771673100000,
+          "price": 5125.33
+        },
+        {
+          "type": "TP3",
+          "when": 1771677000000,
+          "price": 5130.33
+        },
+        {
+          "type": "TP4",
+          "when": 1771681800000,
+          "price": 5135.33
+        },
+        {
+          "type": "TP5",
+          "when": 1771692600000,
+          "price": 5145.33
+        }
+      ],
+      "recordedTs": 1771632328250,
+      "resolvedAt": 1771692600000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771632328250",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771633200000,
+        "price": 5119.33
+      },
+      {
+        "type": "TP2",
+        "when": 1771673100000,
+        "price": 5125.33
+      },
+      {
+        "type": "TP3",
+        "when": 1771677000000,
+        "price": 5130.33
+      },
+      {
+        "type": "TP4",
+        "when": 1771681800000,
+        "price": 5135.33
+      },
+      {
+        "type": "TP5",
+        "when": 1771692600000,
+        "price": 5145.33
+      }
+    ],
+    "created_at": "2026-02-21T00:05:28.448Z",
+    "updated_at": "2026-02-21T16:55:07.740Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771621200000|5109|5120|5104|5120",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771621200000|5109|5120|5104|5120",
+      "sl": 5137.945,
+      "ref": {
+        "c": 5120.06,
+        "h": 5120.08,
+        "l": 5103.6,
+        "o": 5108.91,
+        "t": 1771621200000,
+        "v": 838.1989,
+        "closed": true
+      },
+      "tp1": 5108.94,
+      "tp2": 5102.94,
+      "tp3": 5097.94,
+      "tp4": 5092.94,
+      "tp5": 5082.94,
+      "tp6": 4966.07,
+      "side": "SELL",
+      "entry": 5112.945,
+      "h1_ts": 1771621200000,
+      "origin": "client-12wasrlz",
+      "reason": "SL",
+      "status": "DELETED",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771628719482,
+      "hitHistory": [],
+      "recordedTs": 1771628719482,
+      "resolvedAt": 1771682100000
+    },
+    "status": "DELETED",
+    "entry_ts": "1771628719482",
+    "hit_history": [],
+    "created_at": "2026-02-20T23:05:19.664Z",
+    "updated_at": "2026-02-23T13:34:11.472Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771599600000|5068|5079|5007|5056",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771599600000|5068|5079|5007|5056",
+      "sl": 5103.610000000001,
+      "ref": {
+        "c": 5056.03,
+        "h": 5078.79,
+        "l": 5007.1,
+        "o": 5068.25,
+        "t": 1771599600000,
+        "v": 3420.5686,
+        "closed": true
+      },
+      "tp1": 5074.61,
+      "tp2": 5068.61,
+      "tp3": 5063.61,
+      "tp4": 5058.61,
+      "tp5": 5048.61,
+      "tp6": 4966.07,
+      "side": "SELL",
+      "entry": 5078.610000000001,
+      "h1_ts": 1771599600000,
+      "origin": "client-12wasrlz",
+      "reason": "TP2",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771607508024,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771607700000,
+          "price": 5074.61
+        },
+        {
+          "type": "TP2",
+          "when": 1771608000000,
+          "price": 5068.61
+        }
+      ],
+      "recordedTs": 1771607508024,
+      "resolvedAt": 1771608000000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771607508024",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771607700000,
+        "price": 5074.61
+      },
+      {
+        "type": "TP2",
+        "when": 1771608000000,
+        "price": 5068.61
+      }
+    ],
+    "created_at": "2026-02-20T17:11:49.583Z",
+    "updated_at": "2026-02-20T17:22:17.615Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771596000000|5059|5075|5052|5068",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771596000000|5059|5075|5052|5068",
+      "sl": 5033.02,
+      "ref": {
+        "c": 5068.24,
+        "h": 5075,
+        "l": 5052.49,
+        "o": 5058.76,
+        "t": 1771596000000,
+        "v": 843.689,
+        "closed": true
+      },
+      "tp1": 5062.02,
+      "tp2": 5068.02,
+      "tp3": 5073.02,
+      "tp4": 5078.02,
+      "tp5": 5088.02,
+      "side": "BUY",
+      "entry": 5058.02,
+      "h1_ts": 1771596000000,
+      "origin": "client-12wasrlz",
+      "reason": "TP5",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771603255642,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771603500000,
+          "price": 5062.02
+        },
+        {
+          "type": "TP2",
+          "when": 1771604100000,
+          "price": 5068.02
+        },
+        {
+          "type": "TP4",
+          "when": 1771605000000,
+          "price": 5078.02
+        },
+        {
+          "type": "TP3",
+          "when": 1771605000000,
+          "price": 5073.02
+        },
+        {
+          "type": "TP5",
+          "when": 1771617300000,
+          "price": 5088.02
+        }
+      ],
+      "recordedTs": 1771603255642,
+      "resolvedAt": 1771617300000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771603255642",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771603500000,
+        "price": 5062.02
+      },
+      {
+        "type": "TP2",
+        "when": 1771604100000,
+        "price": 5068.02
+      },
+      {
+        "type": "TP4",
+        "when": 1771605000000,
+        "price": 5078.02
+      },
+      {
+        "type": "TP3",
+        "when": 1771605000000,
+        "price": 5073.02
+      },
+      {
+        "type": "TP5",
+        "when": 1771617300000,
+        "price": 5088.02
+      }
+    ],
+    "created_at": "2026-02-20T16:00:59.022Z",
+    "updated_at": "2026-02-20T19:58:58.426Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771585200000|5046|5046|5028|5028",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771585200000|5046|5046|5028|5028",
+      "sl": 5009.43,
+      "ref": {
+        "c": 5028.35,
+        "h": 5046.01,
+        "l": 5027.59,
+        "o": 5046.01,
+        "t": 1771585200000,
+        "v": 374.6541,
+        "closed": true
+      },
+      "tp1": 5038.43,
+      "tp2": 5044.43,
+      "tp3": 5049.43,
+      "tp4": 5054.43,
+      "tp5": 5064.43,
+      "tp6": 5088,
+      "side": "BUY",
+      "entry": 5034.43,
+      "h1_ts": 1771585200000,
+      "origin": "client-ohvmy18r",
+      "reason": "TP5",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771592706870,
+      "hitHistory": [
+        {
+          "type": "TP2",
+          "when": 1771593000000,
+          "price": 5044.43
+        },
+        {
+          "type": "TP1",
+          "when": 1771593000000,
+          "price": 5038.43
+        },
+        {
+          "type": "TP4",
+          "when": 1771593300000,
+          "price": 5054.43
+        },
+        {
+          "type": "TP3",
+          "when": 1771593300000,
+          "price": 5049.43
+        },
+        {
+          "type": "TP5",
+          "when": 1771597800000,
+          "price": 5064.43
+        }
+      ],
+      "recordedTs": 1771592706870,
+      "resolvedAt": 1771597800000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771592706870",
+    "hit_history": [
+      {
+        "type": "TP2",
+        "when": 1771593000000,
+        "price": 5044.43
+      },
+      {
+        "type": "TP1",
+        "when": 1771593000000,
+        "price": 5038.43
+      },
+      {
+        "type": "TP4",
+        "when": 1771593300000,
+        "price": 5054.43
+      },
+      {
+        "type": "TP3",
+        "when": 1771593300000,
+        "price": 5049.43
+      },
+      {
+        "type": "TP5",
+        "when": 1771597800000,
+        "price": 5064.43
+      }
+    ],
+    "created_at": "2026-02-20T13:04:11.324Z",
+    "updated_at": "2026-02-20T16:29:58.463Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771581600000|5034|5088|5028|5046",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771581600000|5034|5088|5028|5046",
+      "sl": 5005.38,
+      "ref": {
+        "c": 5046.01,
+        "h": 5088,
+        "l": 5027.59,
+        "o": 5034.44,
+        "t": 1771581600000,
+        "v": 3318.1022,
+        "closed": true
+      },
+      "tp1": 5034.38,
+      "tp2": 5040.38,
+      "tp3": 5045.38,
+      "tp4": 5050.38,
+      "tp5": 5060.38,
+      "tp6": 5088,
+      "side": "BUY",
+      "entry": 5030.38,
+      "h1_ts": 1771581600000,
+      "origin": "client-12wasrlz",
+      "reason": "TP6",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771590313798,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771590900000,
+          "price": 5034.38
+        },
+        {
+          "type": "TP5",
+          "when": 1771592700000,
+          "price": 5060.38
+        },
+        {
+          "type": "TP4",
+          "when": 1771592700000,
+          "price": 5050.38
+        },
+        {
+          "type": "TP3",
+          "when": 1771592700000,
+          "price": 5045.38
+        },
+        {
+          "type": "TP2",
+          "when": 1771592700000,
+          "price": 5040.38
+        },
+        {
+          "type": "TP6",
+          "when": 1771609800000,
+          "price": 5088
+        }
+      ],
+      "recordedTs": 1771590313798,
+      "resolvedAt": 1771609800000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771590313798",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771590900000,
+        "price": 5034.38
+      },
+      {
+        "type": "TP5",
+        "when": 1771592700000,
+        "price": 5060.38
+      },
+      {
+        "type": "TP4",
+        "when": 1771592700000,
+        "price": 5050.38
+      },
+      {
+        "type": "TP3",
+        "when": 1771592700000,
+        "price": 5045.38
+      },
+      {
+        "type": "TP2",
+        "when": 1771592700000,
+        "price": 5040.38
+      },
+      {
+        "type": "TP6",
+        "when": 1771609800000,
+        "price": 5088
+      }
+    ],
+    "created_at": "2026-02-20T12:25:15.493Z",
+    "updated_at": "2026-02-20T18:01:05.983Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771574400000|5015|5036|5013|5035",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771574400000|5015|5036|5013|5035",
+      "sl": 5062.7,
+      "ref": {
+        "c": 5035.2,
+        "h": 5036.03,
+        "l": 5012.99,
+        "o": 5015.1,
+        "t": 1771574400000,
+        "v": 376.7425,
+        "closed": true
+      },
+      "tp1": 5033.7,
+      "tp2": 5027.7,
+      "tp3": 5022.7,
+      "side": "SELL",
+      "entry": 5037.7,
+      "h1_ts": 1771574400000,
+      "origin": "client-7h9urahy",
+      "reason": "TP2",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": 1771581753634,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771581900000,
+          "price": 5033.7
+        },
+        {
+          "type": "TP2",
+          "when": 1771582200000,
+          "price": 5027.7
+        }
+      ],
+      "recordedTs": 1771581753634,
+      "resolvedAt": 1771582200000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771581753634",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771581900000,
+        "price": 5033.7
+      },
+      {
+        "type": "TP2",
+        "when": 1771582200000,
+        "price": 5027.7
+      }
+    ],
+    "created_at": "2026-02-20T10:02:35.563Z",
+    "updated_at": "2026-02-20T16:29:59.864Z"
+  },
+  {
+    "canonical_id": "PAXGUSDT|1771531200000|4996|5011|4996|5010",
+    "symbol": "PAXGUSDT",
+    "setup": {
+      "id": "PAXGUSDT|1771531200000|4996|5011|4996|5010",
+      "sl": 5030.285,
+      "ref": {
+        "c": 5010.15,
+        "h": 5011.34,
+        "l": 4996.21,
+        "o": 4996.21,
+        "t": 1771531200000,
+        "v": 124.6275,
+        "closed": true
+      },
+      "tp1": 5001.28,
+      "tp2": 4995.28,
+      "tp3": 4990.28,
+      "side": "SELL",
+      "entry": 5005.285,
+      "h1_ts": 1771531200000,
+      "origin": null,
+      "reason": "TP1",
+      "status": "SUCCESS",
+      "symbol": "PAXGUSDT",
+      "entryTs": null,
+      "hitHistory": [
+        {
+          "type": "TP1",
+          "when": 1771545300000,
+          "price": 5001.28
+        }
+      ],
+      "recordedTs": 1771540461146,
+      "resolvedAt": 1771545300000
+    },
+    "status": "SUCCESS",
+    "entry_ts": "1771540461146",
+    "hit_history": [
+      {
+        "type": "TP1",
+        "when": 1771545300000,
+        "price": 5001.28
+      }
+    ],
+    "created_at": "2026-02-20T07:39:48.811Z",
+    "updated_at": "2026-02-20T16:30:02.826Z"
+  }
+]
