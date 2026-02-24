@@ -1256,6 +1256,8 @@ async function retryPendingPosts(){
           remaining.push({ setup: setupObj, pendingTargets: { db: needDb, file: needFile } });
         } else {
           console.log('Retried and posted pending setup', setupObj.id);
+          // mark local setup as server-synced when DB successful
+          if(dbOk) markSetupServerSynced(setupObj, (res.dbResp && res.dbResp.clone && res.dbResp.clone().json) ? await safeParseJson(res.dbResp) : null);
         }
       }catch(e){ remaining.push(item); }
     }
@@ -1263,6 +1265,10 @@ async function retryPendingPosts(){
   }catch(e){ console.warn('retryPendingPosts error', e); }
 }
 setInterval(retryPendingPosts, 60*1000);
+// safe JSON parse helper for Response objects
+async function safeParseJson(resp){
+  try{ if(!resp) return null; const txt = await resp.text(); if(!txt) return null; return JSON.parse(txt); }catch(e){ return null; }
+}
 // Push setup to server (best-effort, non-blocking). Server requires DATABASE_URL configured.
 // apiUpsertSetup remains a convenience wrapper that attempts both endpoints.
 async function apiUpsertSetup(s, targets={db:true,file:true}){
@@ -1279,7 +1285,24 @@ async function apiUpsertSetup(s, targets={db:true,file:true}){
 function enqueuePending(s, targets={db:true,file:true}){
   try{
     const pending = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
-    pending.push({ setup: s, pendingTargets: targets });
+    // dedupe by canonical id to avoid repeated queue entries
+    const cid = getCanonicalId(s) || s.id;
+    if(!cid){ pending.push({ setup: s, pendingTargets: targets }); }
+    else {
+      const existing = pending.find(p => {
+        const ps = p.setup || p;
+        const pid = getCanonicalId(ps) || ps.id;
+        return pid === cid;
+      });
+      if(existing){
+        // update pendingTargets to include any newly requested targets
+        existing.pendingTargets = existing.pendingTargets || {db:true,file:true};
+        existing.pendingTargets.db = existing.pendingTargets.db || !!targets.db;
+        existing.pendingTargets.file = existing.pendingTargets.file || !!targets.file;
+      } else {
+        pending.push({ setup: s, pendingTargets: targets });
+      }
+    }
     localStorage.setItem('crt_pending_posts_v1', JSON.stringify(pending));
   }catch(e){ console.warn('enqueuePending failed', e); }
 }
@@ -1324,8 +1347,50 @@ async function pushSetupToServer(s, targets={db:true,file:true}){
       }catch(e){ console.warn('File retry after DB success failed', e); }
     }
 
+    // If DB is OK, mark local setup as server-synced so it's visible and authoritative
+    if(result.dbOk){
+      try{
+        // try to extract server returned row (may include canonical_id/created_at)
+        let body = null;
+        try{ body = await (result.dbResp && result.dbResp.clone && result.dbResp.clone().json ? result.dbResp.clone().json() : null); }catch(e){}
+        markSetupServerSynced(s, body || null);
+      }catch(e){ /* ignore marking errors */ }
+    }
+
     return result;
   }catch(e){ console.warn('pushSetupToServer unexpected error', e); return result; }
+}
+
+// Mark local stored setup as synced with server (merge server metadata if available)
+function markSetupServerSynced(s, serverRow){
+  try{
+    if(!s || !s.id) return;
+    const list = loadSetups();
+    const idx = list.findIndex(x=>getCanonicalId(x) === getCanonicalId(s) || x.id === s.id);
+    if(idx === -1) return;
+    const local = list[idx];
+    // merge useful server fields when provided
+    if(serverRow){
+      if(serverRow.canonical_id) local.id = serverRow.canonical_id;
+      if(serverRow.created_at) local.recordedTs = new Date(serverRow.created_at).getTime();
+      if(serverRow.status) local.status = serverRow.status;
+      if(serverRow.setup && typeof serverRow.setup === 'object'){
+        local.entry = local.entry || serverRow.setup.entry;
+        local.sl = local.sl || serverRow.setup.sl;
+        local.tp1 = local.tp1 || serverRow.setup.tp1;
+        local.tp2 = local.tp2 || serverRow.setup.tp2;
+        local.tp3 = local.tp3 || serverRow.setup.tp3;
+        local.tp4 = local.tp4 || serverRow.setup.tp4;
+        local.tp5 = local.tp5 || serverRow.setup.tp5;
+        local.tp6 = local.tp6 || serverRow.setup.tp6;
+        local.hitHistory = local.hitHistory || serverRow.setup.hitHistory || serverRow.setup.hit_history || [];
+      }
+    }
+    local.serverSynced = true;
+    list[idx] = local;
+    saveSetups(list);
+    refreshSetupViews();
+  }catch(e){ console.warn('markSetupServerSynced error', e); }
 }
 
 // Patch an existing setup on the server with new status/hitHistory (best-effort)
@@ -1471,7 +1536,45 @@ async function refreshSetupViews(){
   let list = loadSetups();
   try{
     const server = await fetchServerSetups();
-    if(server && Array.isArray(server)) list = server.map(row=>{ const s = row.setup||row||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; });
+    if(server && Array.isArray(server)){
+      // Merge server rows into local list, preserving local-only entries (like queued pending)
+      const map = {};
+      // seed with local entries
+      for(const l of list){ const id = getCanonicalId(l) || l.id; if(!id) continue; map[id] = {...l, id}; }
+      // integrate server rows (server authoritative for shared fields)
+      for(const row of server){
+        const s = row.setup || row || {};
+        const id = row.canonical_id || s.id;
+        if(!id) continue;
+        const normalized = {
+          id,
+          symbol: s.symbol || row.symbol || (map[id] && map[id].symbol),
+          status: row.status || s.status || (map[id] && map[id].status) || 'PENDING',
+          origin: s.origin || row.origin || (map[id] && map[id].origin),
+          entryTs: s.entryTs || row.entry_ts || (map[id] && map[id].entryTs),
+          hitHistory: s.hitHistory || s.hit_history || row.hit_history || (map[id] && map[id].hitHistory) || [],
+          recordedTs: s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : (map[id] && map[id].recordedTs) || Date.now()),
+          entry: s.entry || (map[id] && map[id].entry),
+          sl: s.sl || (map[id] && map[id].sl),
+          tp1: s.tp1 || (map[id] && map[id].tp1),
+          tp2: s.tp2 || (map[id] && map[id].tp2),
+          tp3: s.tp3 || (map[id] && map[id].tp3),
+          tp4: s.tp4 || (map[id] && map[id].tp4),
+          tp5: s.tp5 || (map[id] && map[id].tp5),
+          tp6: s.tp6 || (map[id] && map[id].tp6),
+          ref: s.ref || (map[id] && map[id].ref)
+        };
+        map[id] = { ...(map[id] || {}), ...normalized };
+      }
+      // re-insert queued pending posts so they remain visible locally until delivered
+      try{
+        const queued = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
+        for(const q of queued){ const qsetup = q.setup || q; const id = getCanonicalId(qsetup) || qsetup.id; if(!id) continue; if(!map[id]) map[id] = {...qsetup, id}; }
+      }catch(e){ /* ignore queued read errors */ }
+      list = Object.values(map);
+      // persist merged view locally
+      saveSetups(list);
+    }
   }catch(e){ /* fallback to local */ }
   const success = list.filter(s=>s.status==='SUCCESS');
   const fail = list.filter(s=>s.status==='FAILED');
