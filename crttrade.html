@@ -16,7 +16,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
 
 <style>
-  :root{ --bg:#071127; --card:#0b1220; --muted:#9fb0cc; --accent:#0f3b82; }
+  :root{ --bg:#f3f6fb; --card:#ffffff; --muted:#475569; --accent:#2563eb; }
   /* Light dashboard styles for laptop view */
   .light-dashboard{ background:#f8fafc; color:#071127; border-radius:12px; padding:18px; }
   .light-card{ background:#ffffff; color:#071127; border:1px solid #e6eef8; padding:14px; border-radius:10px; }
@@ -28,12 +28,12 @@
   /* dashboard chart card sizing */
   #dashboardSuccessChart{ width:100% !important; height:180px !important }
   html,body{height:100%}
-  body{background:var(--bg); color:#e6eef8; font-family:Inter,system-ui,Arial; margin:0; padding:18px;}
-  .card{background:var(--card); border:1px solid #132033; padding:14px; border-radius:12px;}
+  body{background:var(--bg); color:#0f1724; font-family:Inter,system-ui,Arial; margin:0; padding:18px;}
+  .card{background:var(--card); border:1px solid #e6eef8; padding:14px; border-radius:12px;}
   .btn{padding:8px 12px; border-radius:8px; font-weight:600; cursor:pointer}
   .btn-navy{background:var(--accent); color:white}
-  .btn-black{background:#0b1220;border:1px solid #1f2937;color:#e6eef8}
-  .select, .input { background:#0f1724; color:#e6eef8; padding:8px 10px; border-radius:8px; border:1px solid #263046; width:100%}
+  .btn-black{background:#0f1724;border:1px solid #e6eef8;color:#ffffff}
+  .select, .input { background:#f8fafc; color:#0f1724; padding:8px 10px; border-radius:8px; border:1px solid #e6eef8; width:100%}
   .small{font-size:.85rem; color:#9fb0cc}
   .tag{background:#0f1724;padding:8px;border-radius:8px;border:1px solid #1f2a3a}
   #chartArea{ width:14cm; height:7.6cm; margin:0 auto; }
@@ -345,7 +345,9 @@ function drawMainChart(updateOnly=false){
   const canvasEl = getEl('mainChart');
   if(!canvasEl) return;
   const ctx = canvasEl.getContext('2d');
-  const d = RUNTIME.history;
+  const full = RUNTIME.history || [];
+  const VISIBLE_CANDLES = 120; // show only this many candles on chart for clarity
+  const d = full.slice(-VISIBLE_CANDLES);
   if(!d || !d.length) return;
   const labels = d.map(x=>x.t);
   const candlesticks = d.map(x=>({x:x.t, o:x.o, h:x.h, l:x.l, c:x.c}));
@@ -367,60 +369,102 @@ function drawMainChart(updateOnly=false){
     { id:'price', label:'Price', data: candlesticks }
   ];
 
-  try{
+  // Plugin to draw setup overlay (entry zone, SL, TP range)
+  const setupOverlayPlugin = {
+    id: 'setupOverlay',
+    beforeDraw: (chart) => {
+      try{
+        const s = RUNTIME.currentSetupDrawing;
+        if(!s || !chart.scales || !chart.scales.y) return;
+        const ctx = chart.ctx;
+        const yScale = chart.scales.y;
+        const xScale = chart.scales.x;
+        // draw horizontal lines for entry, SL and TP levels
+        const priceToY = (p) => yScale.getPixelForValue(p);
+        const left = chart.chartArea.left;
+        const right = chart.chartArea.right;
+        ctx.save();
+        // rectangle between SL and best TP
+        const tpMax = s.tpMax;
+        const sl = s.sl;
+        if(tpMax != null && sl != null){
+          const y1 = priceToY(tpMax);
+          const y2 = priceToY(sl);
+          ctx.fillStyle = (s.side === 'BUY') ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+          ctx.fillRect(left, Math.min(y1,y2), right-left, Math.abs(y2-y1));
+        }
+        // entry zone line
+        if(s.entry != null){
+          const ye = priceToY(s.entry);
+          ctx.strokeStyle = '#374151'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+          ctx.beginPath(); ctx.moveTo(left, ye); ctx.lineTo(right, ye); ctx.stroke();
+          ctx.fillStyle = '#111827'; ctx.font = '12px Arial'; ctx.fillText(`Entry ${s.entry.toFixed(2)}`, left+6, ye-6);
+        }
+        // SL line
+        if(sl != null){
+          const ys = priceToY(sl);
+          ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
+          ctx.beginPath(); ctx.moveTo(left, ys); ctx.lineTo(right, ys); ctx.stroke();
+          ctx.fillStyle = '#ef4444'; ctx.fillText(`SL ${sl.toFixed(2)}`, right-80, ys-6);
+        }
+        // TP lines
+        if(Array.isArray(s.tps)){
+          ctx.setLineDash([]);
+          ctx.strokeStyle = '#10b981'; ctx.lineWidth = 1;
+          s.tps.forEach((tp, idx)=>{ if(tp==null) return; const y = priceToY(tp); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); ctx.fillStyle = '#065f46'; ctx.fillText(`TP${idx+1} ${tp.toFixed(2)}`, left+6, y-6); });
+        }
+        ctx.restore();
+      }catch(e){/* ignore overlay errors */}
+    }
+  };
+
+  try {
     RUNTIME.chart = new Chart(ctx, {
       type: (RUNTIME.chartType === 'line') ? 'line' : 'candlestick',
       data: { labels, datasets },
       options: {
-        maintainAspectRatio:false,
-        animation:false,
-        plugins: { legend:{ labels:{ color:'#cfe6ff' } } },
+        maintainAspectRatio: false,
+        animation: false,
         parsing: false,
         plugins: {
-          legend: { labels: { color:'#cfe6ff' } },
+          legend: { labels: { color: '#0f1724' } },
           zoom: {
             pan: { enabled: true, mode: 'x' },
-            zoom: {
-              wheel: { enabled: true },
-              pinch: { enabled: true },
-              mode: 'x'
-            }
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
           }
         },
         scales: {
-          x: { type:'time', ticks:{ color:'#9fb0cc' } },
-          y: { position:'right', ticks:{ color:'#9fb0cc' }, grid:{ color:'#122033' } }
+          x: { type: 'time', ticks: { color: '#9fb0cc' } },
+          y: { position: 'right', ticks: { color: '#9fb0cc' }, grid: { color: '#122033' } }
         }
-      }
+      },
+      plugins: [setupOverlayPlugin]
     });
     attachPanWheel();
-  }catch(e){
+  } catch (e) {
     console.error('Chart render failed, falling back to line chart.', e);
     RUNTIME.chartType = 'line';
-    const fallback = [{ id:'price', label:'Price', data: lineData, type:'line', borderColor:'#3b82f6', pointRadius:0, borderWidth:1.4 }];
+    const fallback = [{ id: 'price', label: 'Price', data: lineData, type: 'line', borderColor: '#3b82f6', pointRadius: 0, borderWidth: 1.4 }];
     RUNTIME.chart = new Chart(ctx, {
       type: 'line',
       data: { labels, datasets: fallback },
       options: {
-        maintainAspectRatio:false,
-        animation:false,
+        maintainAspectRatio: false,
+        animation: false,
+        parsing: false,
         plugins: {
-          legend: { labels: { color:'#cfe6ff' } },
+          legend: { labels: { color: '#0f1724' } },
           zoom: {
             pan: { enabled: true, mode: 'x' },
-            zoom: {
-              wheel: { enabled: true },
-              pinch: { enabled: true },
-              mode: 'x'
-            }
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
           }
         },
-        parsing: false,
         scales: {
-          x: { type:'time', ticks:{ color:'#9fb0cc' } },
-          y: { position:'right', ticks:{ color:'#9fb0cc' }, grid:{ color:'#122033' } }
+          x: { type: 'time', ticks: { color: '#9fb0cc' } },
+          y: { position: 'right', ticks: { color: '#9fb0cc' }, grid: { color: '#122033' } }
         }
-      }
+      },
+      plugins: [setupOverlayPlugin]
     });
     attachPanWheel();
   }
@@ -935,7 +979,8 @@ function updateCRTUI(h1Crt, m5Confirm){
     if(!(RUNTIME.lastServerDetailsHtml && RUNTIME.lastServerDetailsSymbol === RUNTIME.symbol)){
       // Build checklist HTML from analyzeCRTWithData
       const checklist = (h1Crt && h1Crt.checklist) ? h1Crt.checklist : null;
-      const checklistHtml = checklist ? (`<div style="margin-top:8px"><strong>CRT Validation Checklist</strong><div class="small muted">${checklist.premiumDiscountHint||''}</div><ul style="padding-left:16px;margin-top:6px"><li>${checklist.clearCR? '✔' : '✖'} Clear CR candle</li><li>${checklist.liquiditySweep? '✔' : '✖'} Liquidity sweep (stop raid)</li><li>${checklist.displacement? '✔' : '✖'} Displacement / strong reaction</li><li>${checklist.mss? '✔' : '✖'} Market structure shift (MSS)</li><li>${checklist.fvg? '✔' : '✖'} FVG / Imbalance (optional)</li></ul></div>`) : '';
+        const zoneType = (m5Confirm && m5Confirm.zone && m5Confirm.zone.source) ? m5Confirm.zone.source : (checklist && checklist.fvg ? 'FVG' : (checklist && checklist.mss ? 'CoCH' : 'OB'));
+        const checklistHtml = checklist ? (`<div style="margin-top:8px"><strong>CRT Validation Checklist</strong><div class="small muted">${checklist.premiumDiscountHint||''} • ${zoneType||''}</div><ul style="padding-left:16px;margin-top:6px"><li>${checklist.clearCR? '✔' : '✖'} Clear CR candle</li><li>${checklist.liquiditySweep? '✔' : '✖'} Liquidity near range</li><li>${checklist.displacement? '✔' : '✖'} Displacement / strong reaction</li><li>${checklist.mss? '✔' : '✖'} Market structure shift / CoCH (MSS)</li><li>${checklist.fvg? '✔' : '✖'} FVG / Imbalance (optional)</li></ul></div>`) : '';
 
       setHTML(crtDetailsEl,
       `HTF Range: ${h1Crt.range.low.toFixed(2)} → ${h1Crt.range.high.toFixed(2)}<br/>`+
@@ -957,8 +1002,12 @@ function updateCRTUI(h1Crt, m5Confirm){
         );
       }
     }
+
+    // set up overlay drawing info
+    RUNTIME.currentSetupDrawing = { side: h1Crt.side, entry: entry, sl: sl, tps: [tp1,tp2,tp3,tp4,tp5].filter(x=>x!=null), tpMax: (tp5||tp4||tp3||tp2||tp1) };
   } else {
     setHTML(crtDetailsEl, h1Crt.details && h1Crt.details.length ? h1Crt.details.join('<br/>') : '—');
+    RUNTIME.currentSetupDrawing = null;
   }
 
   // Debounced server-authoritative details: avoid rapid flipping between
@@ -1156,16 +1205,45 @@ function addSetupOnce(setup){
   const obj = {...setup, id, status:'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: [] };
   list.push(obj);
   saveSetups(list);
-  // Immediately attempt to post this new setup to the central server (best-effort).
-  // Server will upsert by canonical_id so this is non-destructive; keeping this
-  // ensures multi-device persistence works out-of-the-box.
-  pushSetupToServer(obj).then(r=>{
-    if(!r || !r.ok) console.warn('Initial pushSetupToServer failed', r && r.status);
-    else console.log('Initial pushSetupToServer succeeded', obj.id);
-  }).catch(e=>{ console.warn('pushSetupToServer error', e); });
+  // Attempt to post this new setup to central server and file endpoint. If posting fails,
+  // enqueue for retry via localStorage so we ensure eventual delivery.
+  pushSetupToServer(obj).then(results=>{
+    const failed = results && results.every(r => !(r && r.status === 'fulfilled' && r.value && r.value.ok));
+    if(!results) console.warn('Initial pushSetupToServer returned no results');
+    if(failed){
+      // enqueue to pending posts
+      try{
+        const pending = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
+        pending.push(obj);
+        localStorage.setItem('crt_pending_posts_v1', JSON.stringify(pending));
+        console.warn('Enqueued setup for retry', obj.id);
+      }catch(e){ console.warn('Failed to enqueue pending post', e); }
+    } else {
+      console.log('Initial pushSetupToServer succeeded', obj.id);
+    }
+  }).catch(e=>{ console.warn('pushSetupToServer error', e); try{ const pending = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]'); pending.push(obj); localStorage.setItem('crt_pending_posts_v1', JSON.stringify(pending)); }catch(err){} });
   // Also run the guarded auto-post/merge routine (keeps local copy in sync if server already has row)
   tryAutoPost(obj).catch(e=>console.warn('auto-post error', e));
 }
+
+// Retry any pending posts stored in localStorage every 60s
+async function retryPendingPosts(){
+  try{
+    const raw = JSON.parse(localStorage.getItem('crt_pending_posts_v1') || '[]');
+    if(!Array.isArray(raw) || !raw.length) return;
+    const remaining = [];
+    for(const p of raw){
+      try{
+        const res = await pushSetupToServer(p);
+        const ok = Array.isArray(res) && res.some(r => r && r.status === 'fulfilled' && r.value && r.value.ok);
+        if(!ok) remaining.push(p);
+        else console.log('Retried and posted pending setup', p.id);
+      }catch(e){ remaining.push(p); }
+    }
+    localStorage.setItem('crt_pending_posts_v1', JSON.stringify(remaining));
+  }catch(e){ console.warn('retryPendingPosts error', e); }
+}
+setInterval(retryPendingPosts, 60*1000);
 // Push setup to server (best-effort, non-blocking). Server requires DATABASE_URL configured.
 async function apiUpsertSetup(s){
   try{
