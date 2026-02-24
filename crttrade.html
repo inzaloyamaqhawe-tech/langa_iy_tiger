@@ -349,7 +349,7 @@ function drawMainChart(updateOnly=false){
   if(!canvasEl) return;
   const ctx = canvasEl.getContext('2d');
   const full = RUNTIME.history || [];
-  const VISIBLE_CANDLES = 610; // show this many candles on chart for clarity (increased per request)
+  const VISIBLE_CANDLES = 150; // show this many candles on chart (reduced per request)
   const d = full.slice(-VISIBLE_CANDLES);
   if(!d || !d.length) return;
   const labels = d.map(x=>x.t);
@@ -418,22 +418,17 @@ function drawMainChart(updateOnly=false){
         }
 
         // Broker-style position boxes (only when confirmed)
-        // s.confirmed should be set when M5 confirmation exists. Draw
-        // green profit box above entry for BUY and red profit box below entry for SELL.
+        // Draw profit area in green and SL area in red regardless of side.
         if(s.confirmed){
           try{
             const entryY = (s.entry!=null) ? priceToY(s.entry) : null;
             const slY = (s.sl!=null) ? priceToY(s.sl) : null;
             const tpY = (s.tpMax!=null) ? priceToY(s.tpMax) : null;
-            // BUY: green box from entry up to tpMax, red box from sl up to entry
-            if(s.side === 'BUY'){
-              if(tpY != null && entryY != null){ ctx.fillStyle = 'rgba(16,185,129,0.18)'; ctx.fillRect(left, Math.min(tpY, entryY), right-left, Math.abs(entryY - tpY)); }
-              if(slY != null && entryY != null){ ctx.fillStyle = 'rgba(239,68,68,0.12)'; ctx.fillRect(left, Math.min(slY, entryY), right-left, Math.abs(entryY - slY)); }
-            }
-            // SELL: red profit box from entry down to tpMax, green box from entry up to sl
-            if(s.side === 'SELL'){
-              if(tpY != null && entryY != null){ ctx.fillStyle = 'rgba(239,68,68,0.18)'; ctx.fillRect(left, Math.min(tpY, entryY), right-left, Math.abs(entryY - tpY)); }
-              if(slY != null && entryY != null){ ctx.fillStyle = 'rgba(16,185,129,0.12)'; ctx.fillRect(left, Math.min(slY, entryY), right-left, Math.abs(entryY - slY)); }
+            if(entryY != null){
+              // profit zone (entry <-> tpMax)
+              if(tpY != null){ ctx.fillStyle = 'rgba(16,185,129,0.18)'; ctx.fillRect(left, Math.min(tpY, entryY), right-left, Math.abs(entryY - tpY)); }
+              // SL zone (entry <-> sl)
+              if(slY != null){ ctx.fillStyle = 'rgba(239,68,68,0.12)'; ctx.fillRect(left, Math.min(slY, entryY), right-left, Math.abs(entryY - slY)); }
             }
           }catch(e){/* ignore position draw errors */}
         }
@@ -861,62 +856,7 @@ function confirmM5WithH1(m5Data, h1Signal){
   };
 }
 
-// Advanced CRT validation: narrative alignment, engineered liquidity, displacement quality,
-// structural break confirmation, efficiency (FVG) and clear liquidity target.
-function advancedValidateCRT({h1Crt, m5Confirm, h1, m5}){
-  const reasons = [];
-  if(!h1Crt || h1Crt.status !== 'VALID CRT SETUP'){
-    reasons.push('No valid HTF CRT');
-    return { ok:false, reasons };
-  }
-  // 1) Narrative alignment: quick trend estimate on H1 (avg close-open)
-  try{
-    const closed = getClosed(h1 || []).slice(-30);
-    if(closed.length >= 8){
-      const avg = closed.reduce((s,c)=>s + (c.c - c.o), 0) / closed.length;
-      const trend = avg > 0 ? 'BUY' : 'SELL';
-      if(trend !== h1Crt.side) reasons.push('Macro trend misaligned');
-    }
-  }catch(e){ /* ignore */ }
-
-  // 2) True liquidity engineering: require prior compression and engineered sweep on LTF
-  if(!precededByCompression(h1 || [], 8)) reasons.push('No prior compression (inducement)');
-  if(!(m5Confirm && m5Confirm.sweep)) reasons.push('Missing engineered sweep on LTF');
-
-  // 3) Displacement quality: require strong body and minimal overlap on sweep/confirmation
-  try{
-    if(m5Confirm && m5Confirm.sweep){
-      const s = m5Confirm.sweep; const body = Math.abs(s.c - s.o); const range = Math.max(1e-9, s.h - s.l);
-      const bodyPct = body / range;
-      if(bodyPct < 0.45) reasons.push('Weak displacement on confirmation');
-    } else {
-      reasons.push('No displacement candle detected');
-    }
-  }catch(e){}
-
-  // 4) Structural violation type / MSS: prefer external structure break
-  try{ const mss = detectMSS(m5 || [], h1Crt.side, 12); if(!(mss && mss.ok)) reasons.push('No clear MSS/CHoCH on confirmation LTF'); }catch(e){}
-
-  // 5) Efficiency: require an FVG or OB zone on the confirmation LTF
-  try{ const f = detectFVG(m5 || []); if(!(f && f.zone)) reasons.push('No clear FVG/OB on confirmation LTF'); }catch(e){}
-
-  // 6) Premium/discount fractal: check entry aligns with discount/premium per HTF range
-  try{
-    const entry = (m5Confirm && m5Confirm.entry) ? m5Confirm.entry : (h1Crt.range && h1Crt.range.mid);
-    const mid = h1Crt.range && h1Crt.range.mid;
-    if(mid && entry){
-      if(h1Crt.side === 'BUY' && entry > mid) reasons.push('Entry in premium on BUY (fractal misalignment)');
-      if(h1Crt.side === 'SELL' && entry < mid) reasons.push('Entry in discount on SELL (fractal misalignment)');
-    }
-  }catch(e){}
-
-  // 7) Liquidity target: ensure an obvious target exists (unmitigated resting stops)
-  try{ const tgt = getLiquidityTarget(h1 || [], h1Crt.side, 80); if(!tgt) reasons.push('No clear liquidity target on HTF'); }catch(e){}
-
-  // Decision rule: strict — require zero advanced invalidation reasons to pass.
-  const ok = reasons.length === 0;
-  return { ok, reasons };
-}
+// advanced validation removed per user request: use only original CRT checks
 
 function rrTargets(entry, sl){
   const risk = Math.abs(entry - sl);
@@ -1500,6 +1440,8 @@ async function syncFromServer(){
 function updateSetupStatus(id, status, reason, resolvedAt){
   const list = loadSetups(); const idx = list.findIndex(s=>s.id===id); if(idx===-1) return; list[idx].status = status; if(reason) list[idx].reason = reason; list[idx].resolvedAt = resolvedAt||Date.now(); saveSetups(list);
 }
+
+// advanced flagging removed per user request
 function exportSetups(){ const data = loadSetups(); const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'crt_setups.json'; a.click(); URL.revokeObjectURL(url); }
 function importSetupsFile(file){
   const reader = new FileReader();
@@ -1999,13 +1941,13 @@ async function checkAllAssetsSignals(){
       if(typeof tp4 !== 'undefined' && tp4 !== null) setupObj.tp4 = tp4;
       if(typeof tp5 !== 'undefined' && tp5 !== null) setupObj.tp5 = tp5;
       if(typeof tp6 !== 'undefined' && tp6 !== null) setupObj.tp6 = tp6;
-      // Run advanced validation; if it fails, do NOT post or store the setup per user policy.
+      // Record the H1-valid setup immediately (always). Advanced validation
+      // will only suppress notifications but will NOT prevent recording/posting.
       try{
-        const adv = advancedValidateCRT({ h1Crt, m5Confirm, h1, m5 });
-        if(!adv.ok){ console.warn('Advanced CRT validation failed — not recording setup', adv.reasons); return; }
-      }catch(e){ console.warn('Advanced validation error', e); }
-      addSetupOnce(setupObj);
-      refreshSetupViews();
+        addSetupOnce(setupObj);
+        refreshSetupViews();
+      }catch(e){ console.warn('addSetupOnce failed', e); }
+      // Advanced validation removed — no further checks here per user request
     }catch(e){ console.warn('addSetupOnce failed', e); }
 
     const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=> (typeof x === 'number' ? x.toFixed(2) : x)).join(' / ');
