@@ -643,7 +643,7 @@ function analyzeCRTWithData(data){
   // 3) Displacement (MANDATORY): strong impulsive movement on C2
   const displacement = isCleanImpulse(c2) || (Math.abs(c2.c - c2.o) / Math.max(1e-9, (c2.h - c2.l)) >= 0.45);
   if(!displacement){
-    return { status:'INVALID CRT', side:'—', reason:'Mandatory displacement on C2 not detected.', details, range:{high:crh, low:crl, mid}, checklist:{ clearRange, liquidity: detectLiquidity, displacement, structuralAlignment:false, fvg:false, oneSided:false } };
+    return { status:'INVALID CRT', side:'—', reason:'Mandatory displacement on C2 not detected.', details, range:{high:crh, low:crl, mid}, checklist:{ clearCR: !!clearRange, liquiditySweep: !!detectLiquidity, displacement: !!displacement, structuralAlignment: false, fvg: false, oneSided: false, premiumDiscountHint: 'Sell upper half / Buy lower half (use range mid)'} };
   }
 
   // 4) Market structure alignment: coarse HTF bias check
@@ -668,13 +668,16 @@ function analyzeCRTWithData(data){
     }catch(e){ return false; }
   })();
 
+  const mssOk = (()=>{ try{ const mm = detectMSS(closed, side, 12); return !!(mm && mm.ok); }catch(e){ return false; } })();
+
   const checklist = {
     clearRange: !!clearRange,
     liquidity: !!detectLiquidity,
     displacement: !!displacement,
     structuralAlignment: !!structuralAlignment,
     fvg: !!fvgOk,
-    oneSided: !!oneSided
+    oneSided: !!oneSided,
+    mss: !!mssOk
   };
 
   const humanChecks = [checklist.clearRange, checklist.liquidity, checklist.displacement, checklist.structuralAlignment, checklist.fvg, checklist.oneSided];
