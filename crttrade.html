@@ -687,6 +687,17 @@ function analyzeCRTWithData(data){
   };
 }
 
+// Require a minimum number of checklist items to be true before allowing
+// system notifications. Returns true when at least `min` items are passed.
+function meetsChecklistThreshold(h1Crt, min=3){
+  if(!h1Crt || !h1Crt.checklist) return false;
+  const c = h1Crt.checklist;
+  const keys = ['clearCR','liquiditySweep','displacement','mss','fvg'];
+  let passed = 0;
+  for(const k of keys) if(!!c[k]) passed++;
+  return passed >= min;
+}
+
 function detectMSS(data, side, lookback=10){
   const closed = getClosed(data);
   if(closed.length < lookback + 2) return {ok:false, reason:'Not enough M5 candles for MSS'};
@@ -911,10 +922,13 @@ function updateCRTUI(h1Crt, m5Confirm){
     if(m5Confirm.ok && m5Confirm.sweep){
       const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=>x.toFixed(2)).join(' / ');
       const tp6Text = tp6 ? tp6.toFixed(2) : '—';
-      notifyUser(symbol,
-        `CRT ${h1Crt.side} on ${symbolLabel()}`,
-        `Entry: ${entry.toFixed(2)} | SL: ${sl ? sl.toFixed(2) : 'Waiting'} | TPs: ${tpListText} | TP6: ${tp6Text}`
-      );
+      // Only send system notifications when CRT checklist meets threshold (>= 3 of 5)
+      if(meetsChecklistThreshold(h1Crt, 3)){
+        notifyUser(symbol,
+          `CRT ${h1Crt.side} on ${symbolLabel()}`,
+          `Entry: ${entry.toFixed(2)} | SL: ${sl ? sl.toFixed(2) : 'Waiting'} | TPs: ${tpListText} | TP6: ${tp6Text}`
+        );
+      }
     }
   } else {
     setHTML(crtDetailsEl, h1Crt.details && h1Crt.details.length ? h1Crt.details.join('<br/>') : '—');
@@ -1696,10 +1710,13 @@ async function checkAllAssetsSignals(){
 
     const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=> (typeof x === 'number' ? x.toFixed(2) : x)).join(' / ');
     const tp6Text = tp6 ? (typeof tp6 === 'number' ? tp6.toFixed(2) : tp6) : '—';
-    notifyUser(symbol,
-      `VERDICT: VALID CRT + M5 CONFIRMED (${h1Crt.side}) — ${getLabelFor(symbol)}`,
-      `H1: ${h1Crt.reason}\nM5: ${m5Confirm.reason}\nEntry: ${entry.toFixed(2)} | SL: ${sl.toFixed(2)} | TPs: ${tpListText} | TP6: ${tp6Text}`
-    );
+    // Only notify when the H1 checklist meets the minimum threshold (>=3/5)
+    if(meetsChecklistThreshold(h1Crt, 3)){
+      notifyUser(symbol,
+        `VERDICT: VALID CRT + M5 CONFIRMED (${h1Crt.side}) — ${getLabelFor(symbol)}`,
+        `H1: ${h1Crt.reason}\nM5: ${m5Confirm.reason}\nEntry: ${entry.toFixed(2)} | SL: ${sl.toFixed(2)} | TPs: ${tpListText} | TP6: ${tp6Text}`
+      );
+    }
   });
 }
 
