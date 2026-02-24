@@ -1314,7 +1314,28 @@ async function fetchServerSetups(){
     let r = await fetch('/api/setups');
     if(r.ok){
       const j = await r.json();
-      if(j && Array.isArray(j.setups)) return j.setups;
+      if(j && Array.isArray(j.setups)){
+        // Normalize DB rows to the client-shaped setup objects used elsewhere
+        return j.setups.map(row => {
+          // row may be { canonical_id, symbol, setup(json), status, entry_ts, hit_history, created_at }
+          const s = row.setup && typeof row.setup === 'object' ? { ...row.setup } : (row || {});
+          // prefer canonical fields from row when present
+          s.id = row.canonical_id || s.id || s.canonical_id;
+          s.canonical_id = s.id;
+          s.symbol = s.symbol || row.symbol || (s.setup && s.setup.symbol) || s.symbol;
+          s.status = s.status || row.status || s.status || 'PENDING';
+          s.origin = s.origin || row.origin || s.origin;
+          // entry timestamps: expose as numeric ms in recordedTs/entryTs for client use
+          s.entryTs = s.entryTs || row.entry_ts || s.entry_ts || s.entryTs;
+          s.recordedTs = s.recordedTs || (row.created_at ? (new Date(row.created_at).getTime()) : (s.recordedTs || s.recordedTs));
+          s.hitHistory = s.hitHistory || row.hit_history || s.hit_history || s.hitHistory || [];
+          // keep top-level numeric fields if present on row
+          if(row.entry_ts && !s.entry) s.entry = s.entry || row.entry_ts;
+          if(row.sl && !s.sl) s.sl = row.sl;
+          if(row.tp1 && !s.tp1) s.tp1 = row.tp1;
+          return s;
+        });
+      }
     }
   }catch(e){ /* continue to fallback */ }
   try{
@@ -1339,6 +1360,52 @@ async function fetchServerSetups(){
     // Convert client setups to row-like objects
     return raw.map(s => ({ canonical_id: s.id || s.canonical_id, symbol: s.symbol, setup: s, status: s.status || 'PENDING', entry_ts: s.entryTs || s.entry_ts || null, hit_history: s.hitHistory || s.hit_history || [], created_at: s.recordedTs? new Date(s.recordedTs).toISOString():null }));
   }catch(e){ return null; }
+}
+
+// Sync JSON fallback file on server with any DB setups missing from the JSON
+async function syncJsonFromDb(){
+  try{
+    // Fetch authoritative DB list
+    const dbRes = await fetch('/api/setups');
+    if(!dbRes.ok) throw new Error('DB /api/setups not available');
+    const dbJson = await dbRes.json();
+    const dbList = Array.isArray(dbJson.setups) ? dbJson.setups : [];
+
+    // Fetch existing JSON fallback (best-effort)
+    let fileList = [];
+    try{
+      const f = await fetch('/data/paxgusdt_setups.json');
+      if(f.ok) fileList = await f.json();
+    }catch(e){ /* ignore */ }
+
+    const fileIds = new Set((fileList || []).map(i => (i.canonical_id || (i.setup && i.setup.id) || i.id)));
+
+    const missing = (dbList || []).filter(r => {
+      const cid = r.canonical_id || (r.setup && r.setup.id) || r.id;
+      return !cid || !fileIds.has(cid) ? !!cid : false;
+    });
+
+    if(!missing.length) return { ok:true, added:0 };
+
+    // Post missing rows to file endpoint one-by-one (server will upsert into data file)
+    const results = [];
+    for(const row of missing){
+      const payload = {
+        canonical_id: row.canonical_id || (row.setup && row.setup.id) || row.id,
+        symbol: row.symbol || (row.setup && row.setup.symbol),
+        setup: row.setup || row,
+        status: row.status || 'PENDING',
+        entry_ts: row.entry_ts || row.entryTs || (row.setup && row.setup.entryTs) || null,
+        hit_history: row.hit_history || row.hitHistory || (row.setup && row.setup.hitHistory) || []
+      };
+      try{
+        const p = await fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        results.push({ row: payload.canonical_id, ok: !!p.ok, status: p.status });
+      }catch(e){ results.push({ row: payload.canonical_id, ok:false, error: String(e) }); }
+    }
+
+    return { ok:true, added: results.filter(r=>r.ok).length, results };
+  }catch(e){ console.warn('syncJsonFromDb failed', e); return { ok:false, error: String(e) }; }
 }
 
 // Render weekly success-rate chart (BUY green, SELL red) for last 7 days
@@ -1660,6 +1727,14 @@ applyKeysBtn.addEventListener('click', ()=> {
 // Sidebar and import/export wiring
 document.getElementById('exportJson').addEventListener('click', exportSetups);
 document.getElementById('importFile').addEventListener('change', (e)=>{ if(e.target.files && e.target.files[0]) importSetupsFile(e.target.files[0]); });
+document.getElementById('pushPending').addEventListener('click', async ()=>{
+  try{
+    const res = await syncJsonFromDb();
+    if(res && res.ok){ alert('JSON sync complete — added ' + (res.added||0) + ' rows'); }
+    else { alert('JSON sync failed: ' + (res && res.error ? res.error : 'unknown')); }
+  }catch(e){ alert('JSON sync error: ' + String(e)); }
+  try{ await refreshSetupViews(); }catch(e){}
+});
   function showView(id){
     // hide all
     ['viewDashboard','viewCRT','viewPending','viewSuccess','viewFail'].forEach(v=>{ const el = document.getElementById(v); if(el) el.style.display = 'none'; });
