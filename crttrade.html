@@ -898,14 +898,6 @@ function updateCRTUI(h1Crt, m5Confirm){
       // Build checklist HTML from analyzeCRTWithData
       const checklist = (h1Crt && h1Crt.checklist) ? h1Crt.checklist : null;
       const checklistHtml = checklist ? (`<div style="margin-top:8px"><strong>CRT Validation Checklist</strong><div class="small muted">${checklist.premiumDiscountHint||''}</div><ul style="padding-left:16px;margin-top:6px"><li>${checklist.clearCR? '✔' : '✖'} Clear CR candle</li><li>${checklist.liquiditySweep? '✔' : '✖'} Liquidity sweep (stop raid)</li><li>${checklist.displacement? '✔' : '✖'} Displacement / strong reaction</li><li>${checklist.mss? '✔' : '✖'} Market structure shift (MSS)</li><li>${checklist.fvg? '✔' : '✖'} FVG / Imbalance (optional)</li></ul></div>`) : '';
-      // Advanced validation reasons (strict gating logic). Show if failing to explain why.
-      let advHtml = '';
-      try{
-        const adv = advancedValidateCRT({ h1Crt, m5Confirm, h1: RUNTIME.historyH1, m5: RUNTIME.historyM5 });
-        if(adv && !adv.ok && adv.reasons && adv.reasons.length){
-          advHtml = `<div style="margin-top:8px;color:#fecaca"><strong>Advanced validation failed:</strong><ul style="padding-left:16px;margin-top:6px">` + adv.reasons.map(r=>`<li>${r}</li>`).join('') + `</ul></div>`;
-        }
-      }catch(e){ /* ignore */ }
 
       setHTML(crtDetailsEl,
       `HTF Range: ${h1Crt.range.low.toFixed(2)} → ${h1Crt.range.high.toFixed(2)}<br/>`+
@@ -1136,13 +1128,21 @@ function addSetupOnce(setup){
 // Push setup to server (best-effort, non-blocking). Server requires DATABASE_URL configured.
 async function apiUpsertSetup(s){
   try{
-    await fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
+    // attempt to write to both DB-backed API and file-backed endpoint concurrently
+    await Promise.allSettled([
+      fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) }),
+      fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })
+    ]);
   }catch(e){ console.warn('api upsert failed', e); }
 }
 
 // Manual helper: push a single setup object to the server (returns the fetch Promise)
 function pushSetupToServer(s){
-  return fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
+  // Post to DB and file endpoint concurrently and return a Promise resolving when both attempts settle
+  return Promise.allSettled([
+    fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) }),
+    fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })
+  ]);
 }
 
 // Patch an existing setup on the server with new status/hitHistory (best-effort)
@@ -1151,9 +1151,14 @@ async function patchSetupToServer(s){
   try{
     const url = `/api/setups/${encodeURIComponent(s.id)}`;
     const body = { status: s.status, hitHistory: s.hitHistory, setup: s, entry_ts: s.entryTs || s.recordedTs };
-    const r = await fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    if(!r.ok) console.warn('patchSetupToServer failed', r.status);
-    return r;
+    // send PATCH to DB-backed API and POST to file-backed endpoint (best-effort)
+    const results = await Promise.allSettled([
+      fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }),
+      fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })
+    ]);
+    const dbRes = results[0] && results[0].status === 'fulfilled' ? results[0].value : null;
+    if(dbRes && !dbRes.ok) console.warn('patchSetupToServer failed', dbRes.status);
+    return dbRes;
   }catch(e){ console.warn('patchSetupToServer error', e); }
 }
 
@@ -1163,14 +1168,12 @@ async function patchSetupToServer(s){
 async function tryAutoPost(s){
   if(!s || !s.id) return;
   try{
-    const r = await fetch('/api/setups');
-    if(!r.ok) { console.warn('Server not available for auto-post', r.status); return; }
-    const j = await r.json();
-    if(!j || !Array.isArray(j.setups)) return;
-    const exists = j.setups.some(x => x.canonical_id === s.id);
+    const serverList = await fetchServerSetups();
+    if(!serverList || !Array.isArray(serverList)) { console.warn('Server not available for auto-post'); return; }
+    const exists = serverList.some(x => x.canonical_id === s.id || x.id === s.id);
     if(exists){
       // server already has it — check if server's TP/SL values differ from our computed setup.
-      const serverRow = j.setups.find(x=>x.canonical_id === s.id);
+      const serverRow = serverList.find(x=> (x.canonical_id && x.canonical_id === s.id) || x.id === s.id || (x.setup && x.setup.id === s.id));
       if(serverRow && serverRow.setup){
         const srv = serverRow.setup;
         // compare numeric fields tp1..tp6, sl, entry
@@ -1197,32 +1200,20 @@ async function tryAutoPost(s){
       }
       return;
     }
-    // not present — push as a new setup
+    // not present — push as a new setup to both targets
     await pushSetupToServer(s);
-    console.log('Auto-pushed setup to server', s.id);
+    console.log('Auto-pushed setup to server/file', s.id);
   }catch(e){ console.warn('tryAutoPost failed', e); }
 }
 
 // Pull setups from server and merge into local storage (non-destructive). Keeps import/export modal.
 async function syncFromServer(){
   try{
-    const r = await fetch('/api/setups');
-    if(!r.ok) throw new Error('server not available');
-    const j = await r.json();
-    if(!j || !Array.isArray(j.setups)) throw new Error('invalid server response');
-    const server = j.setups.map(row=>{
-      const s = row.setup || {};
-      s.id = row.canonical_id || s.id;
-      s.symbol = s.symbol || row.symbol;
-      s.status = row.status || s.status || 'PENDING';
-      s.origin = s.origin || row.origin;
-      s.entryTs = s.entryTs || row.entry_ts;
-      s.hitHistory = s.hitHistory || row.hit_history || [];
-      s.recordedTs = s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : Date.now());
-      return s;
-    });
+    const server = await fetchServerSetups();
+    if(!server || !Array.isArray(server)) throw new Error('server not available');
     // Server authoritative: overwrite local storage with server list. Local JSON remains a backup.
-    saveSetups(server);
+    const serverNormalized = server.map(row=>{ const s = row.setup || row || {}; s.id = row.canonical_id || s.id || s.id; s.symbol = s.symbol || row.symbol; s.status = row.status || s.status || 'PENDING'; s.origin = s.origin || row.origin; s.entryTs = s.entryTs || row.entry_ts; s.hitHistory = s.hitHistory || row.hit_history || []; s.recordedTs = s.recordedTs || (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; });
+    saveSetups(serverNormalized);
     refreshSetupViews();
   }catch(e){
     console.warn('sync from server failed', e);
@@ -1268,8 +1259,8 @@ async function refreshSetupViews(){
   // Prefer server-authoritative data when available
   let list = loadSetups();
   try{
-    const r = await fetch('/api/setups');
-    if(r.ok){ const j = await r.json(); if(j && Array.isArray(j.setups)) list = j.setups.map(row=>{ const s = row.setup||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; }); }
+    const server = await fetchServerSetups();
+    if(server && Array.isArray(server)) list = server.map(row=>{ const s = row.setup||row||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; });
   }catch(e){ /* fallback to local */ }
   const success = list.filter(s=>s.status==='SUCCESS');
   const fail = list.filter(s=>s.status==='FAILED');
@@ -1319,11 +1310,34 @@ async function refreshSetupViews(){
 // fetch server setups (return client-shaped array) - returns null on error
 async function fetchServerSetups(){
   try{
-    const r = await fetch('/api/setups');
-    if(!r.ok) return null;
-    const j = await r.json();
-    if(!j || !Array.isArray(j.setups)) return null;
-    return j.setups.map(row=>{ const s = row.setup||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; });
+    // Primary: DB-backed API
+    let r = await fetch('/api/setups');
+    if(r.ok){
+      const j = await r.json();
+      if(j && Array.isArray(j.setups)) return j.setups;
+    }
+  }catch(e){ /* continue to fallback */ }
+  try{
+    // Fallback: static JSON file written by server at /data/paxgusdt_setups.json
+    const f = await fetch('/data/paxgusdt_setups.json');
+    if(f.ok){
+      const arr = await f.json();
+      if(Array.isArray(arr)){
+        // Normalize DB-row-like entries into the same shape used elsewhere
+        return arr.map(item => {
+          if(item && item.setup) return item;
+          const s = item || {};
+          return { canonical_id: s.canonical_id || s.id || (s.setup && s.setup.id), symbol: s.symbol || (s.setup && s.setup.symbol), setup: s.setup || s, status: s.status || (s.setup && s.setup.status) || 'PENDING', entry_ts: s.entry_ts || s.entryTs || (s.setup && s.setup.entryTs) || null, hit_history: s.hit_history || s.hitHistory || (s.setup && s.setup.hitHistory) || [] , created_at: s.created_at || (s.recordedTs? new Date(s.recordedTs).toISOString():null) };
+        });
+      }
+    }
+  }catch(e){ /* continue to fallback */ }
+  try{
+    // Final fallback: localStorage client copy
+    const raw = JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || '[]');
+    if(!Array.isArray(raw)) return null;
+    // Convert client setups to row-like objects
+    return raw.map(s => ({ canonical_id: s.id || s.canonical_id, symbol: s.symbol, setup: s, status: s.status || 'PENDING', entry_ts: s.entryTs || s.entry_ts || null, hit_history: s.hitHistory || s.hit_history || [], created_at: s.recordedTs? new Date(s.recordedTs).toISOString():null }));
   }catch(e){ return null; }
 }
 
