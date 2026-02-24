@@ -384,13 +384,13 @@ function drawMainChart(updateOnly=false){
         const left = chart.chartArea.left;
         const right = chart.chartArea.right;
         ctx.save();
-        // rectangle between SL and best TP
+        // rectangle between SL and best TP (background range)
         const tpMax = s.tpMax;
         const sl = s.sl;
         if(tpMax != null && sl != null){
           const y1 = priceToY(tpMax);
           const y2 = priceToY(sl);
-          ctx.fillStyle = (s.side === 'BUY') ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+          ctx.fillStyle = (s.side === 'BUY') ? 'rgba(16,185,129,0.06)' : 'rgba(239,68,68,0.06)';
           ctx.fillRect(left, Math.min(y1,y2), right-left, Math.abs(y2-y1));
         }
         // entry zone line
@@ -412,6 +412,27 @@ function drawMainChart(updateOnly=false){
           ctx.setLineDash([]);
           ctx.strokeStyle = '#10b981'; ctx.lineWidth = 1;
           s.tps.forEach((tp, idx)=>{ if(tp==null) return; const y = priceToY(tp); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); ctx.fillStyle = '#065f46'; ctx.fillText(`TP${idx+1} ${tp.toFixed(2)}`, left+6, y-6); });
+        }
+
+        // Broker-style position boxes (only when confirmed)
+        // s.confirmed should be set when M5 confirmation exists. Draw
+        // green profit box above entry for BUY and red profit box below entry for SELL.
+        if(s.confirmed){
+          try{
+            const entryY = (s.entry!=null) ? priceToY(s.entry) : null;
+            const slY = (s.sl!=null) ? priceToY(s.sl) : null;
+            const tpY = (s.tpMax!=null) ? priceToY(s.tpMax) : null;
+            // BUY: green box from entry up to tpMax, red box from sl up to entry
+            if(s.side === 'BUY'){
+              if(tpY != null && entryY != null){ ctx.fillStyle = 'rgba(16,185,129,0.18)'; ctx.fillRect(left, Math.min(tpY, entryY), right-left, Math.abs(entryY - tpY)); }
+              if(slY != null && entryY != null){ ctx.fillStyle = 'rgba(239,68,68,0.12)'; ctx.fillRect(left, Math.min(slY, entryY), right-left, Math.abs(entryY - slY)); }
+            }
+            // SELL: red profit box from entry down to tpMax, green box from entry up to sl
+            if(s.side === 'SELL'){
+              if(tpY != null && entryY != null){ ctx.fillStyle = 'rgba(239,68,68,0.18)'; ctx.fillRect(left, Math.min(tpY, entryY), right-left, Math.abs(entryY - tpY)); }
+              if(slY != null && entryY != null){ ctx.fillStyle = 'rgba(16,185,129,0.12)'; ctx.fillRect(left, Math.min(slY, entryY), right-left, Math.abs(entryY - slY)); }
+            }
+          }catch(e){/* ignore position draw errors */}
         }
         ctx.restore();
       }catch(e){/* ignore overlay errors */}
@@ -473,18 +494,55 @@ function drawMainChart(updateOnly=false){
 function attachPanWheel(){
   const canvas = getEl('mainChart');
   if(!canvas || !RUNTIME.chart) return;
-  if(RUNTIME.panWheelHandler){
-    canvas.removeEventListener('wheel', RUNTIME.panWheelHandler);
-  }
+  // clean previous handlers
+  try{
+    if(RUNTIME.panWheelHandler) canvas.removeEventListener('wheel', RUNTIME.panWheelHandler);
+    if(RUNTIME.panPointerDown) canvas.removeEventListener('pointerdown', RUNTIME.panPointerDown);
+    if(RUNTIME.panPointerMove) canvas.removeEventListener('pointermove', RUNTIME.panPointerMove);
+    if(RUNTIME.panPointerUp) canvas.removeEventListener('pointerup', RUNTIME.panPointerUp);
+  }catch(e){}
+
+  // ensure canvas allows horizontal pointer interactions while still permitting page vertical scroll
+  canvas.style.touchAction = 'pan-y';
+
+  // Wheel -> pan horizontally when user scrolls horizontally or holds shift
   RUNTIME.panWheelHandler = (e) => {
     if(!RUNTIME.chart || !RUNTIME.chart.pan) return;
     const horizontal = Math.abs(e.deltaX) > 0 ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
     if(horizontal !== 0){
       e.preventDefault();
-      RUNTIME.chart.pan({x: -horizontal, y: 0}, undefined, 'default');
+      // invert wheel direction for natural panning
+      RUNTIME.chart.pan({ x: -horizontal, y: 0 }, undefined, 'default');
     }
   };
   canvas.addEventListener('wheel', RUNTIME.panWheelHandler, { passive:false });
+
+  // Pointer drag panning (click-and-drag to scroll left/right like broker charts)
+  let dragging = false;
+  let lastX = 0;
+  RUNTIME.panPointerDown = (e) => {
+    if(e.button !== undefined && e.button !== 0) return; // only left button
+    dragging = true;
+    lastX = e.clientX;
+    canvas.style.cursor = 'grabbing';
+    if(e.pointerId && canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+  };
+  RUNTIME.panPointerMove = (e) => {
+    if(!dragging || !RUNTIME.chart || !RUNTIME.chart.pan) return;
+    const dx = e.clientX - lastX;
+    lastX = e.clientX;
+    // pan the chart by pixel delta (positive dx moves chart to left visually)
+    RUNTIME.chart.pan({ x: dx, y: 0 }, undefined, 'default');
+  };
+  RUNTIME.panPointerUp = (e) => {
+    if(!dragging) return;
+    dragging = false;
+    canvas.style.cursor = 'default';
+    if(e.pointerId && canvas.releasePointerCapture) canvas.releasePointerCapture(e.pointerId);
+  };
+  canvas.addEventListener('pointerdown', RUNTIME.panPointerDown);
+  canvas.addEventListener('pointermove', RUNTIME.panPointerMove);
+  canvas.addEventListener('pointerup', RUNTIME.panPointerUp);
 }
 
 /* Websocket streaming */
@@ -636,9 +694,6 @@ function analyzeCRTWithData(data){
     return {status:'INVALID CRT', side:'—', reason:'H1 reference candle too old', details:[]};
   }
 
-  // Relaxed CRT scoring: evaluate multiple checks and require a minimum
-  // proportion (60%) to be true. However, C2 MUST close back inside C1's
-  // range for any valid CRT (this is mandatory per user request).
   const crh = c1.h;
   const crl = c1.l;
   const mid = (crh + crl) / 2;
@@ -654,82 +709,35 @@ function analyzeCRTWithData(data){
   const closeOutside = c2.c > crh || c2.c < crl;
   details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
 
-  // handle ambiguous dual-sweep by preferring dominant sweep if clear
   if(sweepHigh && sweepLow){
     const dominant = (sweepInfo.highEx > sweepInfo.lowEx) ? 'HIGH' : 'LOW';
     if(Math.abs(sweepInfo.highEx - sweepInfo.lowEx) < 0.015){
-      // ambiguous — count this as a negative for sweep quality but continue
       sweepHigh = false; sweepLow = false;
     } else if(dominant === 'HIGH') { sweepHigh = true; sweepLow = false; }
     else { sweepLow = true; sweepHigh = false; }
   }
 
-  // compute more human-friendly checklist aligned with user's rules
-  const c1BodyPct = candleBodyPct(c1);
-  const c2BodyPct = candleBodyPct(c2);
-  const isDojiC1 = c1BodyPct < 0.12;
-  const isDojiC2 = c2BodyPct < 0.12;
+  // compute checks (closeInside is mandatory)
+  const checks = [];
+  const impulseOk = isCleanImpulse(c1);
+  const compressionOk = precededByCompression(closed);
+  const sweepOk = (sweepHigh || sweepLow);
+  const crosses = countMidpointCrosses(closed, mid, 12);
+  const midpointOk = crosses < 4;
+  checks.push(impulseOk, compressionOk, sweepOk, midpointOk, closeInside);
 
-  // 1) Clear dealing range: prefer a clear impulse reference or noticeable body
-  const clearRange = isCleanImpulse(c1) || (c1BodyPct >= 0.25) || precededByCompression(closed);
-
-  // 2) Liquidity presence: detect repeated highs/lows near CRH/CRL or cluster
-  const detectLiquidity = (()=>{
-    try{
-      const look = closed.slice(-40);
-      const tolerance = (crh - crl) * 0.06; // 6% of range
-      let highCount = 0, lowCount = 0;
-      for(const x of look){ if(Math.abs(x.h - crh) <= tolerance) highCount++; if(Math.abs(x.l - crl) <= tolerance) lowCount++; }
-      return (highCount >= 1 || lowCount >= 1) && (highCount+lowCount > 0);
-    }catch(e){ return false; }
-  })();
-
-  // 3) Displacement (MANDATORY): strong impulsive movement on C2
-  const displacement = isCleanImpulse(c2) || (Math.abs(c2.c - c2.o) / Math.max(1e-9, (c2.h - c2.l)) >= 0.45);
-  if(!displacement){
-    return { status:'INVALID CRT', side:'—', reason:'Mandatory displacement on C2 not detected.', details, range:{high:crh, low:crl, mid}, checklist:{ clearCR: !!clearRange, liquiditySweep: !!detectLiquidity, displacement: !!displacement, structuralAlignment: false, fvg: false, oneSided: false, premiumDiscountHint: 'Sell upper half / Buy lower half (use range mid)'} };
-  }
-
-  // 4) Market structure alignment: coarse HTF bias check
-  const recent = closed.slice(-30);
-  const avgDir = recent.reduce((s,c)=>s + (c.c - c.o), 0) / Math.max(1, recent.length);
-  const structuralAlignment = (avgDir > 0 && sweepLow) || (avgDir < 0 && sweepHigh) || Math.abs(avgDir) < ( (crh-crl) * 0.02 );
-
-  // 5) FVG / imbalance
-  const fvgInfo = detectFVG(closed);
-  const fvgOk = !!(fvgInfo && fvgInfo.zone);
-
-  // 6) One-sided expansion: subsequent candles continue direction without chopping back inside
-  const oneSided = (()=>{
-    try{
-      const look = closed.slice(-4); // include C2 and up to 3 after
-      if(look.length < 1) return false;
-      const dir = (sweepHigh ? -1 : (sweepLow ? 1 : 0));
-      if(dir === 0) return false;
-      let cont = 0; let total = 0;
-      for(const c of look){ total++; if(dir === 1 && c.c > mid) cont++; if(dir === -1 && c.c < mid) cont++; }
-      return cont >= Math.max(1, Math.floor(total/2));
-    }catch(e){ return false; }
-  })();
-
-  const mssOk = (()=>{ try{ const mm = detectMSS(closed, side, 12); return !!(mm && mm.ok); }catch(e){ return false; } })();
-
-  const checklist = {
-    clearRange: !!clearRange,
-    liquidity: !!detectLiquidity,
-    displacement: !!displacement,
-    structuralAlignment: !!structuralAlignment,
-    fvg: !!fvgOk,
-    oneSided: !!oneSided,
-    mss: !!mssOk
-  };
-
-  const humanChecks = [checklist.clearRange, checklist.liquidity, checklist.displacement, checklist.structuralAlignment, checklist.fvg, checklist.oneSided];
-  const passed = humanChecks.filter(Boolean).length;
-  const total = humanChecks.length;
+  const passed = checks.filter(Boolean).length;
+  const total = checks.length;
   const pct = passed / total;
 
-  details.push(`Human checklist: ${passed}/${total} (${Math.round(pct*100)}%) — displacement mandatory, C2 must close inside`);
+  details.push(`CRT score: ${passed}/${total} (${Math.round(pct*100)}%) — C2 must close inside; currently ${closeInside ? 'OK' : 'NOT OK'}`);
+
+  if(!closeInside){
+    return {status:'INVALID CRT', side:'—', reason:'C2 did not close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
+  }
+  if(pct < 0.6){
+    return {status:'WAITING', side:'—', reason:`CRT checks insufficient (${passed}/${total}).`, details, range:{high:crh, low:crl, mid}};
+  }
 
   const side = sweepHigh ? 'SELL' : 'BUY';
   const reason = sweepHigh
@@ -737,7 +745,7 @@ function analyzeCRTWithData(data){
     : 'Valid CRT: C2 swept below CRL and closed back inside range.';
 
   details.push('HTF focus: C1 defines range, C2 validates CRT.');
-  // Additional checklist for user validation
+
   return {
     status:'VALID CRT SETUP',
     side,
@@ -745,16 +753,7 @@ function analyzeCRTWithData(data){
     details,
     range: {high:crh, low:crl, mid},
     ref: c1,
-    manip: c2,
-    checklist: {
-      clearCR: !!checklist.clearRange,
-      liquiditySweep: !!checklist.liquidity,
-      displacement: !!checklist.displacement,
-      structuralAlignment: !!checklist.structuralAlignment,
-      fvg: !!checklist.fvg,
-      oneSided: !!checklist.oneSided,
-      premiumDiscountHint: 'Sell upper half / Buy lower half (use range mid)'
-    }
+    manip: c2
   };
 }
 
@@ -1003,8 +1002,9 @@ function updateCRTUI(h1Crt, m5Confirm){
       }
     }
 
-    // set up overlay drawing info
-    RUNTIME.currentSetupDrawing = { side: h1Crt.side, entry: entry, sl: sl, tps: [tp1,tp2,tp3,tp4,tp5].filter(x=>x!=null), tpMax: (tp5||tp4||tp3||tp2||tp1) };
+    // set up overlay drawing info only when M5 confirmation exists
+    const confirmed = !!(m5Confirm && m5Confirm.ok && m5Confirm.sweep);
+    RUNTIME.currentSetupDrawing = confirmed ? { side: h1Crt.side, entry: entry, sl: sl, tps: [tp1,tp2,tp3,tp4,tp5].filter(x=>x!=null), tpMax: (tp5||tp4||tp3||tp2||tp1), confirmed: true } : null;
   } else {
     setHTML(crtDetailsEl, h1Crt.details && h1Crt.details.length ? h1Crt.details.join('<br/>') : '—');
     RUNTIME.currentSetupDrawing = null;
