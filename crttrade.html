@@ -25,6 +25,8 @@
   .kpi-label{ color:#6b7280; font-size:0.9rem; }
   .badge-buy{ background:#dcfce7; color:#065f46; padding:6px 10px; border-radius:999px; font-weight:700 }
   .badge-sell{ background:#fee2e2; color:#991b1b; padding:6px 10px; border-radius:999px; font-weight:700 }
+  /* Keep sidebar fixed while main content scrolls */
+  #sidebar{ position:sticky; top:18px; height:calc(100vh - 36px); overflow:auto; align-self:flex-start; z-index:20 }
   /* dashboard chart card sizing */
   #dashboardSuccessChart{ width:100% !important; height:180px !important }
   html,body{height:100%}
@@ -35,7 +37,8 @@
   .btn-black{background:#0f1724;border:1px solid #e6eef8;color:#ffffff}
   .select, .input { background:#f8fafc; color:#0f1724; padding:8px 10px; border-radius:8px; border:1px solid #e6eef8; width:100%}
   .small{font-size:.85rem; color:#9fb0cc}
-  .tag{background:#0f1724;padding:8px;border-radius:8px;border:1px solid #1f2a3a}
+  .tag{background:#ffffff;color:#071127;padding:8px;border-radius:8px;border:1px solid #e6eef8}
+  .tag .small, .tag .muted { color: #071127; }
   #chartArea{ width:14cm; height:7.6cm; margin:0 auto; }
   canvas{ max-width:100%; height:100% !important; width:100% !important; }
   .list-scroll{max-height:20rem; overflow:auto}
@@ -346,7 +349,7 @@ function drawMainChart(updateOnly=false){
   if(!canvasEl) return;
   const ctx = canvasEl.getContext('2d');
   const full = RUNTIME.history || [];
-  const VISIBLE_CANDLES = 120; // show only this many candles on chart for clarity
+  const VISIBLE_CANDLES = 610; // show this many candles on chart for clarity (increased per request)
   const d = full.slice(-VISIBLE_CANDLES);
   if(!d || !d.length) return;
   const labels = d.map(x=>x.t);
@@ -1208,20 +1211,25 @@ function addSetupOnce(setup){
   // Attempt to post this new setup to central server and file endpoint. If posting fails,
   // enqueue for retry via localStorage so we ensure eventual delivery.
   pushSetupToServer(obj).then(results=>{
-    const failed = results && results.every(r => !(r && r.status === 'fulfilled' && r.value && r.value.ok));
-    if(!results) console.warn('Initial pushSetupToServer returned no results');
-    if(failed){
-      // enqueue to pending posts
-      try{
-        const pending = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
-        pending.push(obj);
-        localStorage.setItem('crt_pending_posts_v1', JSON.stringify(pending));
-        console.warn('Enqueued setup for retry', obj.id);
-      }catch(e){ console.warn('Failed to enqueue pending post', e); }
-    } else {
-      console.log('Initial pushSetupToServer succeeded', obj.id);
+    if(!results){
+      console.warn('Initial pushSetupToServer returned no results');
+      enqueuePending(obj, { db: true, file: true });
+      return;
     }
-  }).catch(e=>{ console.warn('pushSetupToServer error', e); try{ const pending = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]'); pending.push(obj); localStorage.setItem('crt_pending_posts_v1', JSON.stringify(pending)); }catch(err){} });
+    const { dbOk, fileOk } = results;
+    if(dbOk && fileOk){
+      console.log('Initial pushSetupToServer succeeded (both)', obj.id);
+    } else if(dbOk && !fileOk){
+      console.warn('DB posted but file endpoint failed — enqueue file target', obj.id);
+      enqueuePending(obj, { db: false, file: true });
+    } else if(!dbOk && fileOk){
+      console.warn('File posted but DB failed — enqueue DB target', obj.id);
+      enqueuePending(obj, { db: true, file: false });
+    } else {
+      console.warn('Both DB and file post failed — enqueue both', obj.id);
+      enqueuePending(obj, { db: true, file: true });
+    }
+  }).catch(e=>{ console.warn('pushSetupToServer error', e); enqueuePending(obj, { db: true, file: true }); });
   // Also run the guarded auto-post/merge routine (keeps local copy in sync if server already has row)
   tryAutoPost(obj).catch(e=>console.warn('auto-post error', e));
 }
@@ -1232,36 +1240,92 @@ async function retryPendingPosts(){
     const raw = JSON.parse(localStorage.getItem('crt_pending_posts_v1') || '[]');
     if(!Array.isArray(raw) || !raw.length) return;
     const remaining = [];
-    for(const p of raw){
+    for(const item of raw){
       try{
-        const res = await pushSetupToServer(p);
-        const ok = Array.isArray(res) && res.some(r => r && r.status === 'fulfilled' && r.value && r.value.ok);
-        if(!ok) remaining.push(p);
-        else console.log('Retried and posted pending setup', p.id);
-      }catch(e){ remaining.push(p); }
+        // support legacy simple items (raw setup object) and enriched queued items
+        const setupObj = item.setup || item;
+        const pendingTargets = item.pendingTargets || (item.setup ? item.pendingTargets : { db: true, file: true });
+        // attempt only required targets
+        const res = await pushSetupToServer(setupObj, pendingTargets);
+        const dbOk = res && res.dbOk;
+        const fileOk = res && res.fileOk;
+        // if any target still outstanding, re-enqueue with updated pendingTargets
+        const needDb = pendingTargets.db && !dbOk;
+        const needFile = pendingTargets.file && !fileOk;
+        if(needDb || needFile){
+          remaining.push({ setup: setupObj, pendingTargets: { db: needDb, file: needFile } });
+        } else {
+          console.log('Retried and posted pending setup', setupObj.id);
+        }
+      }catch(e){ remaining.push(item); }
     }
     localStorage.setItem('crt_pending_posts_v1', JSON.stringify(remaining));
   }catch(e){ console.warn('retryPendingPosts error', e); }
 }
 setInterval(retryPendingPosts, 60*1000);
 // Push setup to server (best-effort, non-blocking). Server requires DATABASE_URL configured.
-async function apiUpsertSetup(s){
+// apiUpsertSetup remains a convenience wrapper that attempts both endpoints.
+async function apiUpsertSetup(s, targets={db:true,file:true}){
   try{
-    // attempt to write to both DB-backed API and file-backed endpoint concurrently
-    await Promise.allSettled([
-      fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) }),
-      fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })
-    ]);
-  }catch(e){ console.warn('api upsert failed', e); }
+    const promises = [];
+    if(targets.db){ promises.push(fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })); }
+    if(targets.file){ promises.push(fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })); }
+    const settled = await Promise.allSettled(promises);
+    return settled;
+  }catch(e){ console.warn('api upsert failed', e); return null; }
 }
 
-// Manual helper: push a single setup object to the server (returns the fetch Promise)
-function pushSetupToServer(s){
-  // Post to DB and file endpoint concurrently and return a Promise resolving when both attempts settle
-  return Promise.allSettled([
-    fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) }),
-    fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })
-  ]);
+// Helper to enqueue pending posts with explicit target flags
+function enqueuePending(s, targets={db:true,file:true}){
+  try{
+    const pending = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
+    pending.push({ setup: s, pendingTargets: targets });
+    localStorage.setItem('crt_pending_posts_v1', JSON.stringify(pending));
+  }catch(e){ console.warn('enqueuePending failed', e); }
+}
+
+// Resilient push: try DB and File endpoints, prefer success on at least one, and return result object
+async function pushSetupToServer(s, targets={db:true,file:true}){
+  const result = { dbOk: false, fileOk: false, dbResp: null, fileResp: null };
+  try{
+    // Attempt DB first if desired
+    if(targets.db){
+      try{
+        const r = await fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
+        result.dbResp = r;
+        if(r && r.ok) result.dbOk = true;
+      }catch(e){ console.warn('DB post error', e); }
+    }
+
+    // Attempt file endpoint
+    if(targets.file){
+      try{
+        const r2 = await fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
+        result.fileResp = r2;
+        if(r2 && r2.ok) result.fileOk = true;
+      }catch(e){ console.warn('File endpoint post error', e); }
+    }
+
+    // If DB failed but file succeeded, retry DB once
+    if(!result.dbOk && result.fileOk && targets.db){
+      try{
+        const r = await fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
+        result.dbResp = r;
+        if(r && r.ok) result.dbOk = true;
+      }catch(e){ console.warn('DB retry after file success failed', e); }
+    }
+
+    // If file failed but DB succeeded, retry file once
+    if(!result.fileOk && result.dbOk && targets.file){
+      try{
+        const r2 = await fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
+        result.fileResp = r2;
+        if(r2 && r2.ok) result.fileOk = true;
+      }catch(e){ console.warn('File retry after DB success failed', e); }
+    }
+
+    return result;
+  }catch(e){ console.warn('pushSetupToServer unexpected error', e); return result; }
 }
 
 // Patch an existing setup on the server with new status/hitHistory (best-effort)
@@ -1330,9 +1394,37 @@ async function syncFromServer(){
   try{
     const server = await fetchServerSetups();
     if(!server || !Array.isArray(server)) throw new Error('server not available');
-    // Server authoritative: overwrite local storage with server list. Local JSON remains a backup.
-    const serverNormalized = server.map(row=>{ const s = row.setup || row || {}; s.id = row.canonical_id || s.id || s.id; s.symbol = s.symbol || row.symbol; s.status = row.status || s.status || 'PENDING'; s.origin = s.origin || row.origin; s.entryTs = s.entryTs || row.entry_ts; s.hitHistory = s.hitHistory || row.hit_history || []; s.recordedTs = s.recordedTs || (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; });
-    saveSetups(serverNormalized);
+    // Merge server rows with local storage instead of blindly overwriting.
+    const local = loadSetups();
+    const map = {};
+    // seed map with local entries (preserve locally-created pending setups)
+    for(const l of local){ const id = getCanonicalId(l) || l.id; if(!id) continue; map[id] = {...l, id}; }
+    // integrate server rows (server authoritative for fields but do not remove local-only pending)
+    for(const row of server){
+      const s = row.setup || row || {};
+      const id = row.canonical_id || s.id;
+      if(!id) continue;
+      const normalized = {
+        id,
+        symbol: s.symbol || row.symbol || (map[id] && map[id].symbol),
+        status: row.status || s.status || (map[id] && map[id].status) || 'PENDING',
+        origin: s.origin || row.origin || (map[id] && map[id].origin),
+        entryTs: s.entryTs || row.entry_ts || (map[id] && map[id].entryTs),
+        hitHistory: s.hitHistory || s.hit_history || row.hit_history || (map[id] && map[id].hitHistory) || [],
+        recordedTs: s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : (map[id] && map[id].recordedTs) || Date.now()),
+        setup: s.setup || s
+      };
+      // merge into map (server values preferred)
+      map[id] = { ...(map[id] || {}), ...normalized };
+    }
+    // re-insert any queued pending posts so they remain visible locally until delivered
+    try{
+      const queued = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
+      for(const q of queued){ const id = getCanonicalId(q) || q.id; if(!id) continue; if(!map[id]) map[id] = {...q, id}; }
+    }catch(e){ /* ignore queued read errors */ }
+
+    const merged = Object.values(map);
+    saveSetups(merged);
     refreshSetupViews();
   }catch(e){
     console.warn('sync from server failed', e);
