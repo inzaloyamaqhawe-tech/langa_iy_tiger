@@ -9,6 +9,7 @@ import fetch from 'node-fetch';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
 
 const app = express();
 app.use(express.json({ limit: '20kb' }));
@@ -120,6 +121,19 @@ let pool = null;
     await pool.connect().then(c=>{ c.release(); console.log('Postgres pool connected'); }).catch(e=>{ console.warn('Postgres connect failed', e.message); pool = null; });
   }catch(e){ console.warn('Postgres init failed', e && e.message ? e.message : e); pool = null; return; }
 
+  // Helper: persist current setups to a JSON file (served at /data/<symbol>_setups.json)
+  async function saveSetupsToFile(symbol = 'PAXGUSDT'){
+    try{
+      const q = `SELECT canonical_id, symbol, setup, status, entry_ts, hit_history, created_at, updated_at FROM setups WHERE upper(symbol) = $1 ORDER BY created_at DESC LIMIT 500`;
+      const r = await pool.query(q, [symbol.toUpperCase()]);
+      const dir = path.join(__dirname, 'data');
+      await fs.mkdir(dir, { recursive: true });
+      const outPath = path.join(dir, `${symbol.toLowerCase()}_setups.json`);
+      await fs.writeFile(outPath, JSON.stringify(r.rows || [], null, 2), 'utf8');
+      console.log('Wrote setups file', outPath);
+    }catch(e){ console.warn('Failed to write setups file', e && e.message ? e.message : e); }
+  }
+
   // Register setups API routes now that pool is available
   app.get('/api/setups', async (req,res)=>{
     try{
@@ -139,6 +153,8 @@ let pool = null;
                  RETURNING canonical_id, symbol, setup, status, entry_ts, hit_history, created_at`;
       const vals = [canonical_id, symbol || null, setup || {}, status || 'PENDING', origin || null, entry_ts || null];
       const r = await pool.query(q, vals);
+      // best-effort: update JSON file copy for the symbol
+      saveSetupsToFile((symbol || 'PAXGUSDT')).catch(()=>{});
       return res.json({ ok:true, row: r.rows[0] });
     }catch(e){ console.error('POST /api/setups error', e); return res.status(500).json({ error:'db error' }); }
   });
@@ -159,7 +175,10 @@ let pool = null;
       vals.push(canonical);
       const r = await pool.query(q, vals);
       if(!r.rows.length) return res.status(404).json({ error:'not found' });
-      return res.json({ ok:true, row: r.rows[0] });
+      const row = r.rows[0];
+      const symbolToSave = row?.symbol || (body && body.setup && body.setup.symbol) || 'PAXGUSDT';
+      saveSetupsToFile(symbolToSave).catch(()=>{});
+      return res.json({ ok:true, row });
     }catch(e){ console.error('PATCH /api/setups error', e); return res.status(500).json({ error:'db error' }); }
   });
 
@@ -171,11 +190,53 @@ let pool = null;
       await pool.query('BEGIN');
       const r = await pool.query(`DELETE FROM setups WHERE upper(symbol) LIKE $1 RETURNING canonical_id`, [like]);
       await pool.query('COMMIT');
+      // best-effort: update file for pattern (if exact symbol, update that file; otherwise refresh default)
+      if(pattern && !pattern.includes('%')){
+        saveSetupsToFile(pattern).catch(()=>{});
+      }else{
+        saveSetupsToFile('PAXGUSDT').catch(()=>{});
+      }
       return res.json({ ok:true, deleted: r.rows.length });
     }catch(e){ try{ await pool.query('ROLLBACK'); }catch(_){} console.error('DELETE /api/admin/cleanup error', e); return res.status(500).json({ error:'db error' }); }
   });
 
 })();
+
+// File-backed setups endpoint (works without DB) - allows frontend to POST directly to the JSON file
+app.post('/api/file/setups', async (req, res) => {
+  try{
+    const body = req.body || {};
+    const symbol = (body.symbol || (body.setup && body.setup.symbol) || 'PAXGUSDT').toString().toUpperCase();
+    const canonical = body.canonical_id || (body.setup && body.setup.canonical_id) || null;
+    if(!canonical) return res.status(400).json({ error: 'canonical_id required' });
+    const dir = path.join(__dirname, 'data');
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, `${symbol.toLowerCase()}_setups.json`);
+    let rows = [];
+    try{
+      const raw = await fs.readFile(filePath, 'utf8');
+      rows = JSON.parse(raw || '[]');
+    }catch(e){ rows = []; }
+    const now = new Date().toISOString();
+    const entry = {
+      canonical_id: canonical,
+      symbol,
+      setup: body.setup || {},
+      status: body.status || (body.setup && body.setup.status) || 'PENDING',
+      entry_ts: body.entry_ts || null,
+      hit_history: body.hit_history || null,
+      created_at: body.created_at || now,
+      updated_at: now
+    };
+    const idx = rows.findIndex(r => String(r.canonical_id) === String(canonical));
+    if(idx >= 0){ rows[idx] = { ...rows[idx], ...entry }; }
+    else { rows.unshift(entry); }
+    // keep file reasonable
+    if(rows.length > 1000) rows = rows.slice(0,1000);
+    await fs.writeFile(filePath, JSON.stringify(rows, null, 2), 'utf8');
+    return res.json({ ok:true, row: entry });
+  }catch(e){ console.error('POST /api/file/setups error', e); return res.status(500).json({ error: 'file write failed' }); }
+});
 
 // Static serving of frontend (optional). Place crttrade.html in same directory.
 const __filename = fileURLToPath(import.meta.url);
