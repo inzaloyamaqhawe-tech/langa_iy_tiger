@@ -33,6 +33,17 @@ function normalizeJsonField(value, fallback){
   return value;
 }
 
+function roundSetupPriceFields(setup){
+  if(!setup || typeof setup !== 'object') return setup;
+  const out = { ...setup };
+  const keys = ['entry','sl','tp1','tp2','tp3','tp4','tp5','tp6'];
+  for(const key of keys){
+    const n = Number(out[key]);
+    if(Number.isFinite(n)) out[key] = Number(n.toFixed(2));
+  }
+  return out;
+}
+
 // Build prompt from task + snapshots
 function buildPrompt(task, snapshot, fundamentals){
   return [
@@ -183,6 +194,7 @@ app.post('/api/setups', async (req,res)=>{
     }
     const normalized = normalizeSetupForSymbol(symbol, setup, canonical_id);
     if(normalized) Object.assign(setup, normalized);
+    Object.assign(setup, roundSetupPriceFields(setup));
   }catch(e){ console.error('normalize error', e); }
   try{
     await db.query(
@@ -205,7 +217,7 @@ app.patch('/api/setups/:canonical', async (req,res)=>{
   if(body.status){ fields.push(`status = $${idx++}`); values.push(body.status); }
   const hitHistory = normalizeJsonField(body.hitHistory, []);
   if(hitHistory !== undefined){ fields.push(`hit_history = $${idx++}::jsonb`); values.push(JSON.stringify(hitHistory)); }
-  const setupObj = normalizeJsonField(body.setup, {});
+  const setupObj = roundSetupPriceFields(normalizeJsonField(body.setup, {}));
   if(setupObj !== undefined){ fields.push(`setup = $${idx++}::jsonb`); values.push(JSON.stringify(setupObj)); }
   if(body.entry_ts){ fields.push(`entry_ts = $${idx++}`); values.push(body.entry_ts); }
   if(fields.length===0) return res.status(400).json({ error:'nothing to update' });
@@ -228,10 +240,38 @@ app.delete('/api/admin/cleanup', async (req,res)=>{
   }catch(e){ console.error('cleanup failed', e); return res.status(500).json({ error:'db error' }); }
 });
 
+// Admin cleanup: delete known legacy SELL entries by exact entry text (protected by setupsAuth)
+app.delete('/api/admin/delete-legacy-sells', async (req,res)=>{
+  if(!setupsAuth(req)) return res.status(401).json({ error:'unauthorized' });
+  if(!db) return res.status(503).json({ error:'database not configured' });
+  const entries = Array.isArray(req.body?.entries) && req.body.entries.length
+    ? req.body.entries.map(String)
+    : ['5133.33','5124.4349999999995','5112.945'];
+  try{
+    const sql = `
+      DELETE FROM setups
+      WHERE upper(symbol) = 'PAXGUSDT'
+        AND upper(coalesce(setup->>'side','')) = 'SELL'
+        AND coalesce(setup->>'entry','') = ANY($1::text[])
+    `;
+    const r = await db.query(sql, [entries]);
+    return res.json({ ok:true, deleted: r.rowCount, entries });
+  }catch(e){
+    console.error('delete-legacy-sells failed', e);
+    return res.status(500).json({ error:'db error' });
+  }
+});
+
 // Static serving of frontend (optional). Place crttrade.html in same directory.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-app.use(express.static(__dirname, { setHeaders: (res) => { res.set('Content-Type', 'text/html; charset=utf-8'); } }));
+app.use(express.static(__dirname, {
+  setHeaders: (res, filePath) => {
+    if(String(filePath).toLowerCase().endsWith('.html')){
+      res.set('Content-Type', 'text/html; charset=utf-8');
+    }
+  }
+}));
 app.get('/', (req,res)=> { res.set('Content-Type', 'text/html; charset=utf-8'); res.sendFile(path.join(__dirname, 'crttrade.html')); });
 
 const PORT = process.env.PORT || 3000;
