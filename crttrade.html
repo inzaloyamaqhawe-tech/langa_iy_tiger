@@ -341,6 +341,7 @@ function canNotify(symbol){
 
 
 function notifyUser(symbol, title, body){
+  if(!NOTIFY.enabled) return;
   if(!canNotify(symbol)) return;
   if('Notification' in window && Notification.permission === 'granted'){
     try{ new Notification(title, { body }); }catch(e){ console.warn('Notification failed', e); }
@@ -1356,6 +1357,10 @@ function importSetupsFile(file){
 }
 async function refreshSetupViews(){
   // Merge local + server so confirmed pending setups show immediately.
+  function hasRealTp1Hit(s){
+    const hh = Array.isArray(s.hitHistory) ? s.hitHistory : (Array.isArray(s.hit_history) ? s.hit_history : []);
+    return hh.some(h => h && h.type && /^TP1$/i.test(String(h.type)));
+  }
   const localList = loadSetups();
   let list = localList;
   try{
@@ -1368,18 +1373,16 @@ async function refreshSetupViews(){
       }
     }
   }catch(e){ /* fallback to local */ }
+  // keep local in sync with merged server view so notification gating uses the same state users see
+  saveSetups(list);
   const sortByLatest = (a,b)=>{
     const ta = Number(a.resolvedAt || a.updatedAt || a.recordedTs || a.entryTs || 0);
     const tb = Number(b.resolvedAt || b.updatedAt || b.recordedTs || b.entryTs || 0);
     return tb - ta;
   };
-  function hasRealTpHit(s){
-    const hh = Array.isArray(s.hitHistory) ? s.hitHistory : (Array.isArray(s.hit_history) ? s.hit_history : []);
-    return hh.some(h => h && h.type && /^TP1$/i.test(String(h.type)));
-  }
-  const success = list.filter(s=>s.status==='SUCCESS' && hasRealTpHit(s)).sort(sortByLatest);
+  const success = list.filter(s=>s.status==='SUCCESS' && hasRealTp1Hit(s)).sort(sortByLatest);
   const fail = list.filter(s=>s.status==='FAILED').sort(sortByLatest);
-  const pending = list.filter(s=>s.status==='PENDING' || (s.status==='SUCCESS' && !hasRealTpHit(s))).sort(sortByLatest);
+  const pending = list.filter(s=>s.status==='PENDING' || (s.status==='SUCCESS' && !hasRealTp1Hit(s))).sort(sortByLatest);
   function fmt2(v){
     const n = Number(v);
     return Number.isFinite(n) ? n.toFixed(2) : '—';
@@ -1738,7 +1741,28 @@ function isSignalTooLate(currentPrice, tp1, tp2, side){
   return false;
 }
 
+let SCAN_IN_PROGRESS = false;
+
+function sleep(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function waitForPendingVisibility(canonicalId, attempts=6, delayMs=350){
+  for(let i=0;i<attempts;i++){
+    try{ await refreshSetupViews(); }catch(e){}
+    const mergedNow = loadSetups();
+    const rowNow = mergedNow.find(x => x && ((x.id === canonicalId) || (getCanonicalId(x) === canonicalId)));
+    const hhNow = rowNow ? (Array.isArray(rowNow.hitHistory) ? rowNow.hitHistory : (Array.isArray(rowNow.hit_history) ? rowNow.hit_history : [])) : [];
+    const tp1Now = hhNow.some(h => h && h.type && /^TP1$/i.test(String(h.type)));
+    const visiblePendingNow = !!rowNow && (rowNow.status === 'PENDING' || (rowNow.status === 'SUCCESS' && !tp1Now));
+    if(visiblePendingNow) return true;
+    await sleep(delayMs);
+  }
+  return false;
+}
+
 async function checkAllAssetsSignals(){
+  if(SCAN_IN_PROGRESS) return;
+  SCAN_IN_PROGRESS = true;
+  try{
   const symbols = ['PAXGUSDT'];
   const results = await Promise.all(symbols.map(async (symbol) => {
     const h1 = await fetchHistorical(symbol, '1h', 300);
@@ -1838,10 +1862,12 @@ async function checkAllAssetsSignals(){
       continue;
     }
 
-    // Refresh views after DB publish so pending reflects persisted setup
-    try{
-      await refreshSetupViews();
-    }catch(e){ console.warn('addSetupOnce failed', e); }
+    // Hard gate: notify only after setup is actually visible in pending list state
+    const visible = await waitForPendingVisibility(canonicalId, 6, 350);
+    if(!visible){
+      console.warn('Skipping notify: setup not visible in pending after DB post', canonicalId);
+      continue;
+    }
 
     const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=> (typeof x === 'number' ? x.toFixed(2) : x)).join(' / ');
     const tp6Text = tp6 ? (typeof tp6 === 'number' ? tp6.toFixed(2) : tp6) : '—';
@@ -1849,6 +1875,9 @@ async function checkAllAssetsSignals(){
       `VERDICT: VALID CRT + M5 CONFIRMED (${h1Crt.side}) — ${getLabelFor(symbol)}`,
       `H1: ${h1Crt.reason}\nM5: ${m5Confirm.reason}\nEntry: ${entry.toFixed(2)} | SL: ${sl.toFixed(2)} | TPs: ${tpListText} | TP6: ${tp6Text}`
     );
+  }
+  } finally {
+    SCAN_IN_PROGRESS = false;
   }
 }
 
