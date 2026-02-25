@@ -278,6 +278,9 @@ let RUNTIME = {
   wsM5: null,
   chart: null,
   panWheelHandler: null,
+  panMouseDownHandler: null,
+  panMouseMoveHandler: null,
+  panMouseUpHandler: null,
   analysisTimer: null,
   countdownTimer: null,
   serverDetailsInFlight: false,
@@ -493,7 +496,7 @@ function drawMainChart(updateOnly=false){
         plugins: {
           legend: { labels: { color:'#64748b' } },
           zoom: {
-            pan: { enabled: true, mode: 'x', onPanComplete(){ RUNTIME.userZoomed = true; } },
+            pan: { enabled: true, mode: 'x', threshold: 0, onPanComplete(){ RUNTIME.userZoomed = true; } },
             zoom: { wheel: { enabled: true }, pinch: { enabled: true }, drag: { enabled: false }, mode: 'x', onZoomComplete(){ RUNTIME.userZoomed = true; } },
             limits: { x: { min: visibleMin, max: visibleMax } }
           }
@@ -519,7 +522,7 @@ function drawMainChart(updateOnly=false){
         plugins: {
           legend: { labels: { color:'#64748b' } },
           zoom: {
-            pan: { enabled: true, mode: 'x', onPanComplete(){ RUNTIME.userZoomed = true; } },
+            pan: { enabled: true, mode: 'x', threshold: 0, onPanComplete(){ RUNTIME.userZoomed = true; } },
             zoom: { wheel: { enabled: true }, pinch: { enabled: true }, drag: { enabled: false }, mode: 'x', onZoomComplete(){ RUNTIME.userZoomed = true; } },
             limits: { x: { min: visibleMin, max: visibleMax } }
           }
@@ -538,9 +541,19 @@ function drawMainChart(updateOnly=false){
 function attachPanWheel(){
   const canvas = getEl('mainChart');
   if(!canvas || !RUNTIME.chart) return;
+  canvas.style.cursor = 'grab';
+
   if(RUNTIME.panWheelHandler){
     canvas.removeEventListener('wheel', RUNTIME.panWheelHandler);
   }
+  if(RUNTIME.panMouseDownHandler) canvas.removeEventListener('mousedown', RUNTIME.panMouseDownHandler);
+  if(RUNTIME.panMouseMoveHandler) canvas.removeEventListener('mousemove', RUNTIME.panMouseMoveHandler);
+  if(RUNTIME.panMouseUpHandler){
+    canvas.removeEventListener('mouseup', RUNTIME.panMouseUpHandler);
+    canvas.removeEventListener('mouseleave', RUNTIME.panMouseUpHandler);
+    window.removeEventListener('mouseup', RUNTIME.panMouseUpHandler);
+  }
+
   RUNTIME.panWheelHandler = (e) => {
     if(!RUNTIME.chart || !RUNTIME.chart.pan) return;
     const horizontal = Math.abs(e.deltaX) > 0 ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
@@ -550,6 +563,36 @@ function attachPanWheel(){
     }
   };
   canvas.addEventListener('wheel', RUNTIME.panWheelHandler, { passive:false });
+
+  let isDragging = false;
+  let lastX = 0;
+  RUNTIME.panMouseDownHandler = (e) => {
+    if(e.button !== 0) return;
+    isDragging = true;
+    lastX = e.clientX;
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
+  };
+  RUNTIME.panMouseMoveHandler = (e) => {
+    if(!isDragging || !RUNTIME.chart || !RUNTIME.chart.pan) return;
+    const dx = e.clientX - lastX;
+    lastX = e.clientX;
+    if(dx !== 0){
+      e.preventDefault();
+      RUNTIME.userZoomed = true;
+      RUNTIME.chart.pan({x: -dx, y: 0}, undefined, 'default');
+    }
+  };
+  RUNTIME.panMouseUpHandler = () => {
+    isDragging = false;
+    canvas.style.cursor = 'grab';
+  };
+
+  canvas.addEventListener('mousedown', RUNTIME.panMouseDownHandler);
+  canvas.addEventListener('mousemove', RUNTIME.panMouseMoveHandler);
+  canvas.addEventListener('mouseup', RUNTIME.panMouseUpHandler);
+  canvas.addEventListener('mouseleave', RUNTIME.panMouseUpHandler);
+  window.addEventListener('mouseup', RUNTIME.panMouseUpHandler);
 }
 
 /* Websocket streaming */
@@ -1751,15 +1794,16 @@ window.addEventListener('error', (ev)=>{
 async function computeDailyOutlook(symbol){
   try{
     const d1 = await fetchHistorical(symbol, '1d', 90);
-    const m15 = await fetchHistorical(symbol, '15m', 4*240);
-    if(!d1 || !m15) return 'Data error';
+    const h1 = await fetchHistorical(symbol, '1h', 24*14);
+    if(!d1 || !h1) return 'Data error';
     const d1Crt = analyzeCRTWithData(d1);
     if(d1Crt.status !== 'VALID CRT SETUP') return 'DAY: WAITING';
-    const m15Confirm = confirmM15WithD1(m15, d1Crt);
-    if(!m15Confirm.ok) return 'DAY: WAITING';
-    // return object with entry so UI can show target
+    const h1Confirm = confirmH1WithD1(h1, d1Crt);
     const target = d1Crt.side === 'BUY' ? d1Crt.range.high : d1Crt.range.low;
-    return { status: `DAY: ${d1Crt.side}`, entry: m15Confirm.entry, side: d1Crt.side, target };
+    if(!h1Confirm.ok){
+      return { status: `DAY: ${d1Crt.side}`, side: d1Crt.side, target, entry: null, confirmed: false, reason: h1Confirm.reason };
+    }
+    return { status: `DAY: ${d1Crt.side}`, entry: h1Confirm.entry, side: d1Crt.side, target, confirmed: true, reason: h1Confirm.reason };
   }catch(e){ return 'Error computing outlook'; }
 }
 
@@ -1856,26 +1900,24 @@ async function refreshDailyOutlooks(){
     for(const sym of symbols){
     try{
       const res = await computeDailyOutlook(sym);
-      // res may be string like 'DAY: BUY' or an object. Prefer showing target when available.
+      // res may be string like 'DAY: BUY' or an object with confirmed/unconfirmed entry.
       let status = 'WAITING';
-      let targetText = null;
+      let entryText = 'Entry: —';
       if(typeof res === 'string'){
         const m = res.match(/\b(BUY|SELL|WAITING)\b/i);
         status = m ? m[1].toUpperCase() : res;
       } else if(res && res.status){
         status = res.status;
       }
-      // if res provides entry/TP info, show target amount in KPI value
-      if(res && res.entry){ targetText = `Entry: ${Number(res.entry).toFixed(2)}`; }
+      if(res && typeof res === 'object'){
+        if(res.confirmed && Number.isFinite(Number(res.entry))) entryText = `Entry: ${Number(res.entry).toFixed(2)}`;
+        else if(status !== 'WAITING') entryText = 'Entry: Unconfirmed';
+      }
       const el = document.getElementById(idMap[sym]);
       const targetEl = document.getElementById(targetMap[sym]);
       const badgeEl = document.getElementById(idBadgeMap[sym]);
       if(el){
-        if(status === 'WAITING'){
-          el.innerHTML = targetText ? `${targetText}` : 'Entry: —';
-        } else {
-          el.innerHTML = targetText ? `${targetText}` : 'Entry: —';
-        }
+        el.innerHTML = entryText;
       }
       if(targetEl){
         if(res && res.target){ targetEl.innerHTML = `D1 target: ${Number(res.target).toFixed(2)}`; }
