@@ -260,7 +260,8 @@ let RUNTIME = {
   lastServerDetailsHtml: '',
   lastServerDetailsFetch: 0,
   lastServerDetailsSymbol: '',
-  notifyTimer: null
+  notifyTimer: null,
+  userZoomed: false
 };
 
 const VISIBLE_CANDLE_COUNT = 150;
@@ -369,8 +370,18 @@ function drawMainChart(updateOnly=false){
     RUNTIME.chart.data.datasets.forEach(ds=>{
       if(ds.id === 'price') ds.data = (RUNTIME.chartType === 'line') ? lineData : candlesticks;
     });
-    RUNTIME.chart.options.scales.x.min = visibleMin;
-    RUNTIME.chart.options.scales.x.max = visibleMax;
+    const xScale = RUNTIME.chart.scales && RUNTIME.chart.scales.x;
+    const currentMin = xScale && Number.isFinite(xScale.min) ? xScale.min : visibleMin;
+    const currentMax = xScale && Number.isFinite(xScale.max) ? xScale.max : visibleMax;
+    const clampedMin = Math.max(visibleMin || currentMin, currentMin);
+    const clampedMax = Math.min(visibleMax || currentMax, currentMax);
+    if(RUNTIME.userZoomed){
+      RUNTIME.chart.options.scales.x.min = clampedMin;
+      RUNTIME.chart.options.scales.x.max = clampedMax;
+    } else {
+      RUNTIME.chart.options.scales.x.min = visibleMin;
+      RUNTIME.chart.options.scales.x.max = visibleMax;
+    }
     RUNTIME.chart.update('none');
     return;
   }
@@ -458,8 +469,9 @@ function drawMainChart(updateOnly=false){
         plugins: {
           legend: { labels: { color:'#64748b' } },
           zoom: {
-            pan: { enabled: false, mode: 'x' },
-            zoom: { wheel: { enabled: false }, pinch: { enabled: false }, drag: { enabled: false }, mode: 'x' }
+            pan: { enabled: true, mode: 'x', onPanComplete(){ RUNTIME.userZoomed = true; } },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, drag: { enabled: true }, mode: 'x', onZoomComplete(){ RUNTIME.userZoomed = true; } },
+            limits: { x: { min: visibleMin, max: visibleMax } }
           }
         },
         scales: {
@@ -483,8 +495,9 @@ function drawMainChart(updateOnly=false){
         plugins: {
           legend: { labels: { color:'#64748b' } },
           zoom: {
-            pan: { enabled: false, mode: 'x' },
-            zoom: { wheel: { enabled: false }, pinch: { enabled: false }, drag: { enabled: false }, mode: 'x' }
+            pan: { enabled: true, mode: 'x', onPanComplete(){ RUNTIME.userZoomed = true; } },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, drag: { enabled: true }, mode: 'x', onZoomComplete(){ RUNTIME.userZoomed = true; } },
+            limits: { x: { min: visibleMin, max: visibleMax } }
           }
         },
         parsing: false,
@@ -1642,6 +1655,7 @@ async function onSymbolChange(){
   try{ if(RUNTIME.wsH1) RUNTIME.wsH1.close(); }catch(e){}
   try{ if(RUNTIME.wsM5) RUNTIME.wsM5.close(); }catch(e){}
   RUNTIME.symbol = symbolSelectEl.value;
+  RUNTIME.userZoomed = false;
   RUNTIME.interval = '5m';
   titleEl.innerText = `${symbolLabel()} `;
   intervalTextEl.innerText = 'M5';
