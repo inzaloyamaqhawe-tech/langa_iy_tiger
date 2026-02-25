@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Langa CRT Trade — PAXGUSD</title>
+<title>Langa CRT Trade</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -88,7 +88,7 @@
           <button id="menuFail" class="btn btn-black">Unsuccessful Trades</button>
           <div class="mt-4">
             <button id="exportJson" class="btn btn-navy">Export JSON</button>
-            <button id="pushPending" class="btn btn-black" style="margin-left:8px">Push Pending</button>
+            <button id="pushPending" class="btn btn-black" style="margin-left:8px">Sync</button>
             <input id="importFile" type="file" accept="application/json" class="mt-2" />
           </div>
         </div>
@@ -102,10 +102,10 @@
                 <div class="d1-label">PAXG</div>
                 <div class="d1-entry" id="paxgEntry">Entry: —</div>
                 <div class="d1-target" id="paxgTarget">D1 target: —</div>
-                <div class="d1-pill wait" id="paxgBadge">WAITING</div>
+                <div class="d1-pill wait" id="paxgBadge">-</div>
               </div>
             </div>
-            <div class="mt-4">Success Rate: <span id="successRate">0%</span></div>
+            <div class="mt-4">Win Percentage: <span id="successRate">0%</span></div>
 
             <div class="mt-4 light-card">
               <h3 class="font-semibold">Weekly Success Rate (Last 7 days)</h3>
@@ -115,15 +115,15 @@
         </div>
         <div id="viewCRT" class="card" style="display:none">
           <div class="flex items-center justify-between">
-            <h1 class="text-2xl font-bold">CRT Trade — Focused (PAXGUSD only)</h1>
-            <div class="small">CRT-only entries. 1:2 Risk/Reward. Not investment advice.</div>
+            <h1 class="text-2xl font-bold">CRT Trade For Billionaires</h1>
+            <div class="small">CRT Setups Detected and Confirmed.</div>
           </div>
 
           <!-- ========== CONFIG (paste keys below) ========== -->
           <div class="card mt-3">
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <div>
-                <label class="small">OpenAI API Key (paste here to enable GPT)</label>
+                <label class="small">OpenAI API Key </label>
                 <input id="openaiKey_view" class="input mt-2" placeholder="sk-..." />
               </div>
               <div>
