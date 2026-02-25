@@ -977,13 +977,6 @@ function updateCRTUI(h1Crt, m5Confirm){
       const currentPrice = (RUNTIME.historyM5 && RUNTIME.historyM5.length) ? RUNTIME.historyM5[RUNTIME.historyM5.length-1].c : null;
       if(isSignalTooLate(currentPrice, tp1, tp2, h1Crt.side)){
         clearCachedSignal(symbol);
-      } else {
-      const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=>x.toFixed(2)).join(' / ');
-      const tp6Text = tp6 ? tp6.toFixed(2) : '—';
-      notifyUser(symbol,
-        `CRT ${h1Crt.side} on ${symbolLabel()}`,
-        `Entry: ${entry.toFixed(2)} | SL: ${sl ? sl.toFixed(2) : 'Waiting'} | TPs: ${tpListText} | TP6: ${tp6Text}`
-      );
       }
     }
   } else {
@@ -1169,7 +1162,7 @@ function loadSetups(){ try{ const raw = JSON.parse(localStorage.getItem(SETUP_ST
 
 function getCanonicalId(s){
   if(!s) return null;
-  if(s.ref && s.ref.t){ const r = s.ref; const sym = s.symbol || ''; return `${sym}|${r.t}|${roundToTick(r.o, sym)}|${roundToTick(r.h, sym)}|${roundToTick(r.l, sym)}|${roundToTick(r.c, sym)}`; }
+  if(s.ref && s.ref.t){ const sym = s.symbol || ''; return `${sym}|${s.ref.t}`; }
   if(s.h1_ts) return `${s.symbol}|${s.h1_ts}`;
   if(s.id) return s.id;
   return null;
@@ -1189,14 +1182,14 @@ function roundSetupPrices(setup){
 function addSetupOnce(setup){
   const list = loadSetups();
   const id = getCanonicalId(setup) || `${setup.symbol}|${setup.h1_ts||setup.ts||Date.now()}`;
-  if(list.find(s=>getCanonicalId(s) === id)) return; // already recorded by canonical id
+  const existing = list.find(s=>getCanonicalId(s) === id || s.id === id);
+  if(existing) return existing;
   const client = getClientId();
   const now = Date.now();
   const obj = roundSetupPrices({...setup, id, status:'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: [] });
   list.push(obj);
   saveSetups(list);
-  // Ensure setup is visible to other devices: post only if DB does not already contain it.
-  ensureSetupPostedForDevices(obj).catch(e=>console.warn('ensureSetupPostedForDevices error', e));
+  return obj;
 }
 // Push setup to server (best-effort, non-blocking). Server requires DATABASE_URL configured.
 async function apiUpsertSetup(s){
@@ -1225,16 +1218,17 @@ async function setupExistsOnServer(canonicalId){
   }
 }
 
-// Cross-device publish rule: only post when DB does not already have this setup
+// Cross-device publish rule: publish first (upsert), then optionally verify
 async function ensureSetupPostedForDevices(s){
-  if(!s || !s.id) return;
-  const exists = await setupExistsOnServer(s.id);
-  if(exists) return;
+  if(!s || !s.id) return false;
   try{
     const r = await pushSetupToServer(s);
-    if(!r || !r.ok) console.warn('ensureSetupPostedForDevices failed', r && r.status);
+    if(r && r.ok) return true;
+    console.warn('ensureSetupPostedForDevices failed', r && r.status);
+    return await setupExistsOnServer(s.id);
   }catch(e){
     console.warn('ensureSetupPostedForDevices error', e);
+    return await setupExistsOnServer(s.id);
   }
 }
 
@@ -1379,9 +1373,13 @@ async function refreshSetupViews(){
     const tb = Number(b.resolvedAt || b.updatedAt || b.recordedTs || b.entryTs || 0);
     return tb - ta;
   };
-  const success = list.filter(s=>s.status==='SUCCESS').sort(sortByLatest);
+  function hasRealTpHit(s){
+    const hh = Array.isArray(s.hitHistory) ? s.hitHistory : (Array.isArray(s.hit_history) ? s.hit_history : []);
+    return hh.some(h => h && h.type && /^TP1$/i.test(String(h.type)));
+  }
+  const success = list.filter(s=>s.status==='SUCCESS' && hasRealTpHit(s)).sort(sortByLatest);
   const fail = list.filter(s=>s.status==='FAILED').sort(sortByLatest);
-  const pending = list.filter(s=>s.status==='PENDING').sort(sortByLatest);
+  const pending = list.filter(s=>s.status==='PENDING' || (s.status==='SUCCESS' && !hasRealTpHit(s))).sort(sortByLatest);
   function fmt2(v){
     const n = Number(v);
     return Number.isFinite(n) ? n.toFixed(2) : '—';
@@ -1509,6 +1507,68 @@ async function renderDashboardChart(){
   });
 }
 
+async function fetchAggTradesRange(symbol, startTime, endTime){
+  const all = [];
+  let fromId = null;
+  const hardCap = 20000;
+  while(all.length < hardCap){
+    let url = `${BINANCE_REST}/aggTrades?symbol=${encodeURIComponent(symbol)}&limit=1000`;
+    if(fromId != null){
+      url += `&fromId=${fromId}`;
+    } else {
+      url += `&startTime=${Math.max(0, startTime-1000)}&endTime=${endTime}`;
+    }
+    const r = await fetch(url);
+    if(!r.ok) break;
+    const page = await r.json();
+    if(!Array.isArray(page) || !page.length) break;
+
+    let added = 0;
+    for(const t of page){
+      if(!t || typeof t.T !== 'number') continue;
+      if(t.T < startTime) continue;
+      if(t.T > endTime) continue;
+      all.push(t);
+      added++;
+    }
+
+    const last = page[page.length-1];
+    if(!last || typeof last.a !== 'number') break;
+    fromId = last.a + 1;
+
+    if(added === 0 && page[page.length-1].T > endTime) break;
+    if(page.length < 1000) break;
+  }
+  all.sort((a,b)=> (a.T - b.T) || (a.a - b.a));
+  return all;
+}
+
+async function resolveIntrabarFirstHit(symbol, side, tpPrices, slPrice, candleStartTs, candleEndTs){
+  try{
+    const trades = await fetchAggTradesRange(symbol, candleStartTs, candleEndTs);
+    if(!trades.length) return null;
+    const cleanTps = (tpPrices || []).map(Number).filter(Number.isFinite);
+    const sl = Number(slPrice);
+    if(!cleanTps.length || !Number.isFinite(sl)) return null;
+
+    for(const t of trades){
+      const p = Number(t.p);
+      if(!Number.isFinite(p)) continue;
+      if(side === 'BUY'){
+        if(p <= sl) return { first: 'SL', at: t.T };
+        if(cleanTps.some(tp => p >= tp)) return { first: 'TP', at: t.T };
+      } else if(side === 'SELL'){
+        if(p >= sl) return { first: 'SL', at: t.T };
+        if(cleanTps.some(tp => p <= tp)) return { first: 'TP', at: t.T };
+      }
+    }
+    return null;
+  }catch(e){
+    console.warn('resolveIntrabarFirstHit failed', e);
+    return null;
+  }
+}
+
 // monitor pending setups and mark success/failure by checking live price
 async function monitorSetups(){
   const list = loadSetups();
@@ -1562,8 +1622,11 @@ async function monitorSetups(){
           if(s.tp1 && c.h >= s.tp1) candleTPs.push('TP1');
           const candleSL = c.l <= s.sl;
           if(candleTPs.length && candleSL){
-            const dir = (c.c >= c.o) ? 'up' : 'down';
-            if(dir !== 'up'){ // SL happened before TP in this candle
+            const tpPrices = candleTPs.map(tp => (tp==='TP6')?s.tp6:(tp==='TP5')?s.tp5:(tp==='TP4')?s.tp4:(tp==='TP3')?s.tp3:(tp==='TP2')?s.tp2:s.tp1);
+            const intrabar = await resolveIntrabarFirstHit(s.symbol, 'BUY', tpPrices, s.sl, c.t, c.t + intervalToMs('5m') - 1);
+            if(intrabar && intrabar.first === 'TP'){
+              // keep TP hits and continue monitoring
+            } else {
               candleTPs.length = 0;
             }
           }
@@ -1583,8 +1646,13 @@ async function monitorSetups(){
           if(s.tp1 && c.l <= s.tp1) candleTPs.push('TP1');
           const candleSL = c.h >= s.sl;
           if(candleTPs.length && candleSL){
-            const dir = (c.c <= c.o) ? 'down' : 'up';
-            if(dir !== 'down'){ candleTPs.length = 0; }
+            const tpPrices = candleTPs.map(tp => (tp==='TP6')?s.tp6:(tp==='TP5')?s.tp5:(tp==='TP4')?s.tp4:(tp==='TP3')?s.tp3:(tp==='TP2')?s.tp2:s.tp1);
+            const intrabar = await resolveIntrabarFirstHit(s.symbol, 'SELL', tpPrices, s.sl, c.t, c.t + intervalToMs('5m') - 1);
+            if(intrabar && intrabar.first === 'TP'){
+              // keep TP hits and continue monitoring
+            } else {
+              candleTPs.length = 0;
+            }
           }
           if(candleTPs.length){ for(const tp of candleTPs){ if(seen.has(tp)) continue; seen.add(tp); const price = (tp==='TP6')?s.tp6:(tp==='TP5')?s.tp5:(tp==='TP4')?s.tp4:(tp==='TP3')?s.tp3:(tp==='TP2')?s.tp2:s.tp1; newHitHistory.push({ type: tp, when: c.t, price }); } }
           if(candleSL){ slTime = c.t; break; }
@@ -1592,10 +1660,11 @@ async function monitorSetups(){
       }
 
       // Determine authoritative status from recomputed history
-      const anyTP = newHitHistory.some(h=>h.type && h.type.startsWith && h.type.startsWith('TP'));
-      const newStatus = anyTP ? 'SUCCESS' : (slTime ? 'FAILED' : (s.status||'PENDING'));
-      const newReason = anyTP ? (newHitHistory[newHitHistory.length-1]?.type || 'TP') : (slTime ? 'SL' : s.reason);
-      const newResolvedAt = anyTP ? (newHitHistory[newHitHistory.length-1]?.when || s.resolvedAt) : (slTime || s.resolvedAt);
+      const tp1Hit = newHitHistory.some(h => h && String(h.type).toUpperCase() === 'TP1');
+      const lastTp = [...newHitHistory].reverse().find(h => h && h.type && String(h.type).toUpperCase().startsWith('TP'));
+      const newStatus = tp1Hit ? 'SUCCESS' : (slTime ? 'FAILED' : 'PENDING');
+      const newReason = tp1Hit ? (lastTp?.type || 'TP1') : (slTime ? 'SL' : 'Pending');
+      const newResolvedAt = tp1Hit ? (lastTp?.when || s.resolvedAt) : (slTime || null);
 
       // Compare with stored; if different, persist to DB (PATCH) and update local storage
       const origHitJson = JSON.stringify(Array.isArray(s.hitHistory)?s.hitHistory:(Array.isArray(s.hit_history)?s.hit_history:[]));
@@ -1621,8 +1690,36 @@ async function monitorSetups(){
   refreshSetupViews();
 }
 
+async function repairWrongfullySuccessfulSetups(){
+  const list = loadSetups();
+  let changed = false;
+  for(const s of list){
+    if(!s || s.status !== 'SUCCESS') continue;
+    const hh = Array.isArray(s.hitHistory) ? s.hitHistory : (Array.isArray(s.hit_history) ? s.hit_history : []);
+    const tp1Hit = hh.some(h => h && String(h.type).toUpperCase() === 'TP1');
+    const slHit = hh.some(h => h && String(h.type).toUpperCase() === 'SL') || String(s.reason || '').toUpperCase() === 'SL';
+    if(tp1Hit) continue; // truly won
+
+    if(slHit){
+      s.status = 'FAILED';
+      s.reason = 'SL';
+      s.resolvedAt = s.resolvedAt || Date.now();
+    }else{
+      s.status = 'PENDING';
+      s.reason = 'Pending';
+      s.resolvedAt = null;
+    }
+    changed = true;
+    try{ await patchSetupToServer(s); }catch(e){ console.warn('repair patch to server failed', e); }
+  }
+  if(changed) saveSetups(list);
+}
+
 setInterval(monitorSetups, 125*1000);
-refreshSetupViews();
+repairWrongfullySuccessfulSetups().finally(()=>{
+  monitorSetups();
+  refreshSetupViews();
+});
 // attempt to sync from central DB (non-destructive merge)
 try{ syncFromServer(); }catch(e){ /* ignore errors */ }
 
@@ -1694,16 +1791,26 @@ async function checkAllAssetsSignals(){
   const valid = results.filter(Boolean);
   if(!valid.length) return;
 
-  valid.forEach((res) => {
+  for(const res of valid){
     const { symbol, h1, m5, h1Crt, m5Confirm, entry, sl, tp1, tp2, tp3, tp4, tp5, tp6 } = res;
 
     // compute h1_ts for dedupe and to check existing saved setups
     const h1_ts = (h1Crt && h1Crt.ref && h1Crt.ref.t) ? h1Crt.ref.t : (h1 && h1.length>1 ? h1[h1.length-2].t : Date.now());
-    const id = `${symbol}|${h1_ts}`;
-    const existing = loadSetups().find(s=>s.id === id);
-    if(existing && existing.status && existing.status !== 'PENDING'){
-      // already resolved, skip notifying and recording
-      return;
+    const setupObj = { symbol, side: h1Crt.side, entry, sl, tp1, tp2, tp3, h1_ts, ref: h1Crt.ref };
+    if(typeof tp4 !== 'undefined' && tp4 !== null) setupObj.tp4 = tp4;
+    if(typeof tp5 !== 'undefined' && tp5 !== null) setupObj.tp5 = tp5;
+    if(typeof tp6 !== 'undefined' && tp6 !== null) setupObj.tp6 = tp6;
+    const canonicalId = getCanonicalId(setupObj) || `${symbol}|${h1_ts}`;
+    const existing = loadSetups().find(s=> (getCanonicalId(s) === canonicalId) || s.id === canonicalId);
+    if(existing){
+      // hard rule: one setup per one HTF CRT reference candle
+      continue;
+    }
+    const existsOnServer = await setupExistsOnServer(canonicalId);
+    if(existsOnServer){
+      // already posted by another device
+      await refreshSetupViews();
+      continue;
     }
 
     // If this is the active symbol, sync the UI verdict to match notification.
@@ -1721,14 +1828,19 @@ async function checkAllAssetsSignals(){
     if(typeof tp6 !== 'undefined' && tp6 !== null) cacheObj.tp6 = tp6;
     cacheSignal(symbol, cacheObj);
 
-    // Record this setup once (deduplicated by HTF ref candle) and refresh UI
+    // Record setup locally first so Pending updates immediately
+    const savedSetup = addSetupOnce(setupObj) || setupObj;
+
+    // Hard rule: setup must be posted to DB before any notification
+    const posted = await ensureSetupPostedForDevices(savedSetup);
+    if(!posted){
+      console.warn('Skipping notify: setup not yet posted to DB', canonicalId);
+      continue;
+    }
+
+    // Refresh views after DB publish so pending reflects persisted setup
     try{
-      const setupObj = { symbol, side: h1Crt.side, entry, sl, tp1, tp2, tp3, h1_ts, ref: h1Crt.ref };
-      if(typeof tp4 !== 'undefined' && tp4 !== null) setupObj.tp4 = tp4;
-      if(typeof tp5 !== 'undefined' && tp5 !== null) setupObj.tp5 = tp5;
-      if(typeof tp6 !== 'undefined' && tp6 !== null) setupObj.tp6 = tp6;
-      addSetupOnce(setupObj);
-      refreshSetupViews();
+      await refreshSetupViews();
     }catch(e){ console.warn('addSetupOnce failed', e); }
 
     const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=> (typeof x === 'number' ? x.toFixed(2) : x)).join(' / ');
@@ -1737,7 +1849,7 @@ async function checkAllAssetsSignals(){
       `VERDICT: VALID CRT + M5 CONFIRMED (${h1Crt.side}) — ${getLabelFor(symbol)}`,
       `H1: ${h1Crt.reason}\nM5: ${m5Confirm.reason}\nEntry: ${entry.toFixed(2)} | SL: ${sl.toFixed(2)} | TPs: ${tpListText} | TP6: ${tp6Text}`
     );
-  });
+  }
 }
 
 /* ========== Event wiring ========== */
