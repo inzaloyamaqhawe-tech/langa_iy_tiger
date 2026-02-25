@@ -9,10 +9,12 @@ import fetch from 'node-fetch';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs/promises';
+import cors from 'cors';
+import { Pool } from 'pg';
 
 const app = express();
 app.use(express.json({ limit: '20kb' }));
+app.use(cors());
 
 // Basic rate limiting (tune for production)
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
@@ -20,6 +22,16 @@ app.use('/api/llm', limiter);
 
 // Utility: safe JSON extraction
 function safeJsonParse(str){ try{ return JSON.parse(str); }catch{return null;} }
+function normalizeJsonField(value, fallback){
+  if(value === undefined) return undefined;
+  if(value === null) return null;
+  if(typeof value === 'string'){
+    const parsed = safeJsonParse(value);
+    if(parsed !== null) return parsed;
+    return fallback;
+  }
+  return value;
+}
 
 // Build prompt from task + snapshots
 function buildPrompt(task, snapshot, fundamentals){
@@ -108,134 +120,112 @@ app.post('/api/llm', async (req,res) => {
 
 app.get('/health', (req,res)=> res.json({ ok:true, ts:Date.now() }));
 
-// If DATABASE_URL is set, enable setups API backed by Postgres
-let pool = null;
+// Postgres pool (enabled when DATABASE_URL is set)
+let db = null;
+if(process.env.DATABASE_URL){
+  db = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized:false } });
+  db.connect().then(c=>{ c.release(); console.log('Postgres pool connected'); }).catch(e=>{ console.error('Postgres connection failed', e.message); db=null; });
+}
 
-(async function initDb(){
-  if(!process.env.DATABASE_URL) return;
+function setupsAuth(req){
+  const token = process.env.SETUPS_API_TOKEN;
+  if(!token) return true;
+  const header = (req.get('Authorization')||'').replace(/^Bearer\s*/i,'');
+  return header === token;
+}
+
+// Always register setups API routes. If DB isn't configured the routes will return 503
+app.get('/api/setups', async (req,res)=>{
+  if(!setupsAuth(req)) return res.status(401).json({ error:'unauthorized' });
+  if(!db) return res.status(503).json({ error:'database not configured', message:'Set DATABASE_URL env var on the server and redeploy.' });
   try{
-    const pg = await import('pg');
-    const Pool = pg.Pool;
-    pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-    // simple test connect
-    await pool.connect().then(c=>{ c.release(); console.log('Postgres pool connected'); }).catch(e=>{ console.warn('Postgres connect failed', e.message); pool = null; });
-  }catch(e){ console.warn('Postgres init failed', e && e.message ? e.message : e); pool = null; return; }
+    // Only return PAXGUSDT setups (system now restricted to PAXGUSD)
+    const q = await db.query("SELECT canonical_id, symbol, setup, status, origin, entry_ts, hit_history, created_at, updated_at FROM setups WHERE upper(symbol) = 'PAXGUSDT' ORDER BY created_at DESC LIMIT 1000");
+    return res.json({ setups: q.rows });
+  }catch(e){ console.error(e); return res.status(500).json({ error:'db error' }); }
+});
 
-  // Helper: persist current setups to a JSON file (served at /data/<symbol>_setups.json)
-  async function saveSetupsToFile(symbol = 'PAXGUSDT'){
-    try{
-      const q = `SELECT canonical_id, symbol, setup, status, entry_ts, hit_history, created_at, updated_at FROM setups WHERE upper(symbol) = $1 ORDER BY created_at DESC LIMIT 500`;
-      const r = await pool.query(q, [symbol.toUpperCase()]);
-      const dir = path.join(__dirname, 'data');
-      await fs.mkdir(dir, { recursive: true });
-      const outPath = path.join(dir, `${symbol.toLowerCase()}_setups.json`);
-      await fs.writeFile(outPath, JSON.stringify(r.rows || [], null, 2), 'utf8');
-      console.log('Wrote setups file', outPath);
-    }catch(e){ console.warn('Failed to write setups file', e && e.message ? e.message : e); }
+app.post('/api/setups', async (req,res)=>{
+  if(!setupsAuth(req)) return res.status(401).json({ error:'unauthorized' });
+  if(!db) return res.status(503).json({ error:'database not configured', message:'Set DATABASE_URL env var on the server and redeploy.' });
+  const payload = req.body || {};
+  const canonical_id = payload.canonical_id || payload.setup?.canonical_id;
+  const symbol = payload.symbol || payload.setup?.symbol;
+  const setup = payload.setup || payload;
+  const status = payload.status || setup.status || 'PENDING';
+  const origin = payload.origin || setup.origin || null;
+  const entry_ts = payload.entry_ts || setup.entryTs || null;
+  if(!canonical_id || !symbol) return res.status(400).json({ error:'canonical_id and symbol required' });
+  // Enforce whitelist: only allow PAXGUSDT setups going forward
+  if(String(symbol).toUpperCase() !== 'PAXGUSDT'){
+    return res.status(403).json({ error:'Only PAXGUSDT setups are accepted by this service' });
   }
-
-  // Register setups API routes now that pool is available
-  app.get('/api/setups', async (req,res)=>{
-    try{
-      const q = `SELECT canonical_id, symbol, setup, status, entry_ts, hit_history, created_at FROM setups WHERE upper(symbol) = 'PAXGUSDT' ORDER BY created_at DESC LIMIT 500`;
-      const r = await pool.query(q);
-      return res.json({ setups: r.rows });
-    }catch(e){ console.error('/api/setups error', e); return res.status(500).json({ error: 'db error' }); }
-  });
-
-  app.post('/api/setups', async (req,res)=>{
-    try{
-      const { canonical_id, symbol, setup, status, origin, entry_ts } = req.body || {};
-      if(!canonical_id) return res.status(400).json({ error:'canonical_id required' });
-      const q = `INSERT INTO setups (canonical_id, symbol, setup, status, origin, entry_ts, created_at, updated_at)
-                 VALUES ($1,$2,$3::jsonb,$4,$5,$6, now(), now())
-                 ON CONFLICT (canonical_id) DO UPDATE SET setup = EXCLUDED.setup, status = EXCLUDED.status, origin = EXCLUDED.origin, entry_ts = EXCLUDED.entry_ts, updated_at = now()
-                 RETURNING canonical_id, symbol, setup, status, entry_ts, hit_history, created_at`;
-      const vals = [canonical_id, symbol || null, setup || {}, status || 'PENDING', origin || null, entry_ts || null];
-      const r = await pool.query(q, vals);
-      // best-effort: update JSON file copy for the symbol
-      saveSetupsToFile((symbol || 'PAXGUSDT')).catch(()=>{});
-      return res.json({ ok:true, row: r.rows[0] });
-    }catch(e){ console.error('POST /api/setups error', e); return res.status(500).json({ error:'db error' }); }
-  });
-
-  app.patch('/api/setups/:canonical', async (req,res)=>{
-    try{
-      const canonical = req.params.canonical;
-      const body = req.body || {};
-      const parts = [];
-      const vals = [];
-      let idx = 1;
-      if(typeof body.status !== 'undefined'){ parts.push(`status = $${idx++}`); vals.push(body.status); }
-      if(typeof body.hitHistory !== 'undefined'){ parts.push(`hit_history = $${idx++}`); vals.push(body.hitHistory); }
-      if(typeof body.setup !== 'undefined'){ parts.push(`setup = $${idx++}::jsonb`); vals.push(body.setup); }
-      if(typeof body.entry_ts !== 'undefined'){ parts.push(`entry_ts = $${idx++}`); vals.push(body.entry_ts); }
-      if(parts.length === 0) return res.status(400).json({ error:'no updatable fields' });
-      const q = `UPDATE setups SET ${parts.join(', ')}, updated_at = now() WHERE canonical_id = $${idx} RETURNING canonical_id, symbol, setup, status, entry_ts, hit_history, created_at`;
-      vals.push(canonical);
-      const r = await pool.query(q, vals);
-      if(!r.rows.length) return res.status(404).json({ error:'not found' });
-      const row = r.rows[0];
-      const symbolToSave = row?.symbol || (body && body.setup && body.setup.symbol) || 'PAXGUSDT';
-      saveSetupsToFile(symbolToSave).catch(()=>{});
-      return res.json({ ok:true, row });
-    }catch(e){ console.error('PATCH /api/setups error', e); return res.status(500).json({ error:'db error' }); }
-  });
-
-  app.delete('/api/admin/cleanup', async (req,res)=>{
-    try{
-      const pattern = (req.query.pattern||'').toString().toUpperCase();
-      if(!pattern) return res.status(400).json({ error:'pattern required' });
-      const like = `%${pattern}%`;
-      await pool.query('BEGIN');
-      const r = await pool.query(`DELETE FROM setups WHERE upper(symbol) LIKE $1 RETURNING canonical_id`, [like]);
-      await pool.query('COMMIT');
-      // best-effort: update file for pattern (if exact symbol, update that file; otherwise refresh default)
-      if(pattern && !pattern.includes('%')){
-        saveSetupsToFile(pattern).catch(()=>{});
-      }else{
-        saveSetupsToFile('PAXGUSDT').catch(()=>{});
-      }
-      return res.json({ ok:true, deleted: r.rows.length });
-    }catch(e){ try{ await pool.query('ROLLBACK'); }catch(_){} console.error('DELETE /api/admin/cleanup error', e); return res.status(500).json({ error:'db error' }); }
-  });
-
-})();
-
-// File-backed setups endpoint (works without DB) - allows frontend to POST directly to the JSON file
-app.post('/api/file/setups', async (req, res) => {
   try{
-    const body = req.body || {};
-    const symbol = (body.symbol || (body.setup && body.setup.symbol) || 'PAXGUSDT').toString().toUpperCase();
-    const canonical = body.canonical_id || (body.setup && body.setup.canonical_id) || null;
-    if(!canonical) return res.status(400).json({ error: 'canonical_id required' });
-    const dir = path.join(__dirname, 'data');
-    await fs.mkdir(dir, { recursive: true });
-    const filePath = path.join(dir, `${symbol.toLowerCase()}_setups.json`);
-    let rows = [];
-    try{
-      const raw = await fs.readFile(filePath, 'utf8');
-      rows = JSON.parse(raw || '[]');
-    }catch(e){ rows = []; }
-    const now = new Date().toISOString();
-    const entry = {
-      canonical_id: canonical,
-      symbol,
-      setup: body.setup || {},
-      status: body.status || (body.setup && body.setup.status) || 'PENDING',
-      entry_ts: body.entry_ts || null,
-      hit_history: body.hit_history || null,
-      created_at: body.created_at || now,
-      updated_at: now
-    };
-    const idx = rows.findIndex(r => String(r.canonical_id) === String(canonical));
-    if(idx >= 0){ rows[idx] = { ...rows[idx], ...entry }; }
-    else { rows.unshift(entry); }
-    // keep file reasonable
-    if(rows.length > 1000) rows = rows.slice(0,1000);
-    await fs.writeFile(filePath, JSON.stringify(rows, null, 2), 'utf8');
-    return res.json({ ok:true, row: entry });
-  }catch(e){ console.error('POST /api/file/setups error', e); return res.status(500).json({ error: 'file write failed' }); }
+    function normalizeSetupForSymbol(sym, st, cid){
+      if(!st || !sym) return st;
+      const S = String(sym).toUpperCase();
+      if(!S.startsWith('ETH')) return st;
+      let entry = Number(st.entry || st.entryPrice || st.entry_ts || NaN);
+      if(!isFinite(entry) && cid && typeof cid === 'string'){
+        const parts = cid.split('|');
+        const last = parts[parts.length-1];
+        const maybe = Number(last);
+        if(isFinite(maybe)) entry = maybe;
+      }
+      if(!isFinite(entry)) return st;
+      const side = String(st.side || 'BUY').toUpperCase();
+      const offsets = side === 'BUY' ? [15,30,45,60,75] : [-15,-30,-45,-60,-75];
+      const round2 = v => Math.round(v*100)/100;
+      const out = Object.assign({}, st);
+      for(let i=0;i<5;i++){ out['tp'+(i+1)] = round2(entry + offsets[i]); }
+      if(!out.entry) out.entry = entry;
+      return out;
+    }
+    const normalized = normalizeSetupForSymbol(symbol, setup, canonical_id);
+    if(normalized) Object.assign(setup, normalized);
+  }catch(e){ console.error('normalize error', e); }
+  try{
+    await db.query(
+      `INSERT INTO setups (canonical_id, symbol, setup, status, origin, entry_ts, hit_history) VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (canonical_id) DO UPDATE SET setup = (EXCLUDED.setup || setups.setup), status = EXCLUDED.status, origin = EXCLUDED.origin, entry_ts = EXCLUDED.entry_ts, updated_at = now()`
+      ,[canonical_id, symbol, setup, status, origin, entry_ts, setup.hitHistory || []]
+    );
+    return res.json({ ok:true });
+  }catch(e){ console.error('upsert failed', e); return res.status(500).json({ error:'db error' }); }
+});
+
+app.patch('/api/setups/:canonical', async (req,res)=>{
+  if(!setupsAuth(req)) return res.status(401).json({ error:'unauthorized' });
+  if(!db) return res.status(503).json({ error:'database not configured', message:'Set DATABASE_URL env var on the server and redeploy.' });
+  const canonical = req.params.canonical;
+  const body = req.body || {};
+  const fields = [];
+  const values = [];
+  let idx = 1;
+  if(body.status){ fields.push(`status = $${idx++}`); values.push(body.status); }
+  const hitHistory = normalizeJsonField(body.hitHistory, []);
+  if(hitHistory !== undefined){ fields.push(`hit_history = $${idx++}::jsonb`); values.push(JSON.stringify(hitHistory)); }
+  const setupObj = normalizeJsonField(body.setup, {});
+  if(setupObj !== undefined){ fields.push(`setup = $${idx++}::jsonb`); values.push(JSON.stringify(setupObj)); }
+  if(body.entry_ts){ fields.push(`entry_ts = $${idx++}`); values.push(body.entry_ts); }
+  if(fields.length===0) return res.status(400).json({ error:'nothing to update' });
+  values.push(canonical);
+  const sql = `UPDATE setups SET ${fields.join(',')}, updated_at = now() WHERE canonical_id = $${idx}`;
+  try{ await db.query(sql, values); return res.json({ ok:true }); }catch(e){ console.error('patch failed', e); return res.status(500).json({ error:'db error' }); }
+});
+
+// Admin cleanup: delete setups for symbol patterns (protected by setupsAuth)
+app.delete('/api/admin/cleanup', async (req,res)=>{
+  if(!setupsAuth(req)) return res.status(401).json({ error:'unauthorized' });
+  if(!db) return res.status(503).json({ error:'database not configured' });
+  const q = req.query || {};
+  const pattern = (q.pattern || '').toUpperCase();
+  if(!pattern) return res.status(400).json({ error:'pattern query required, e.g. ?pattern=ETH' });
+  try{
+    const sql = `DELETE FROM setups WHERE upper(symbol) LIKE $1`;
+    const r = await db.query(sql, [pattern + '%']);
+    return res.json({ ok:true, deleted: r.rowCount });
+  }catch(e){ console.error('cleanup failed', e); return res.status(500).json({ error:'db error' }); }
 });
 
 // Static serving of frontend (optional). Place crttrade.html in same directory.
