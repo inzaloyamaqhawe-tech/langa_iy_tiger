@@ -1126,13 +1126,25 @@ function getCanonicalId(s){
   if(s.id) return s.id;
   return null;
 }
+
+function roundSetupPrices(setup){
+  if(!setup || typeof setup !== 'object') return setup;
+  const out = { ...setup };
+  const keys = ['entry','sl','tp1','tp2','tp3','tp4','tp5','tp6'];
+  for(const key of keys){
+    const n = Number(out[key]);
+    if(Number.isFinite(n)) out[key] = Number(n.toFixed(2));
+  }
+  return out;
+}
+
 function addSetupOnce(setup){
   const list = loadSetups();
   const id = getCanonicalId(setup) || `${setup.symbol}|${setup.h1_ts||setup.ts||Date.now()}`;
   if(list.find(s=>getCanonicalId(s) === id)) return; // already recorded by canonical id
   const client = getClientId();
   const now = Date.now();
-  const obj = {...setup, id, status:'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: [] };
+  const obj = roundSetupPrices({...setup, id, status:'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: [] });
   list.push(obj);
   saveSetups(list);
   // Immediately attempt to post this new setup to the central server (best-effort).
@@ -1154,7 +1166,8 @@ async function apiUpsertSetup(s){
 
 // Manual helper: push a single setup object to the server (returns the fetch Promise)
 function pushSetupToServer(s){
-  return fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
+  const rounded = roundSetupPrices(s);
+  return fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: rounded.id, symbol: rounded.symbol, setup: rounded, status: rounded.status, origin: rounded.origin, entry_ts: rounded.entryTs || rounded.recordedTs }) });
 }
 
 // Patch an existing setup on the server with new status/hitHistory (best-effort)
@@ -1162,7 +1175,8 @@ async function patchSetupToServer(s){
   if(!s || !s.id) return;
   try{
     const url = `/api/setups/${encodeURIComponent(s.id)}`;
-    const body = { status: s.status, hitHistory: s.hitHistory, setup: s, entry_ts: s.entryTs || s.recordedTs };
+    const rounded = roundSetupPrices(s);
+    const body = { status: rounded.status, hitHistory: rounded.hitHistory, setup: rounded, entry_ts: rounded.entryTs || rounded.recordedTs };
     const r = await fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     if(!r.ok) console.warn('patchSetupToServer failed', r.status);
     return r;
@@ -1283,9 +1297,22 @@ async function refreshSetupViews(){
     const r = await fetch('/api/setups');
     if(r.ok){ const j = await r.json(); if(j && Array.isArray(j.setups)) list = j.setups.map(row=>{ const s = row.setup||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; }); }
   }catch(e){ /* fallback to local */ }
-  const success = list.filter(s=>s.status==='SUCCESS');
-  const fail = list.filter(s=>s.status==='FAILED');
-  const pending = list.filter(s=>s.status==='PENDING');
+  const sortByLatest = (a,b)=>{
+    const ta = Number(a.resolvedAt || a.updatedAt || a.recordedTs || a.entryTs || 0);
+    const tb = Number(b.resolvedAt || b.updatedAt || b.recordedTs || b.entryTs || 0);
+    return tb - ta;
+  };
+  const success = list.filter(s=>s.status==='SUCCESS').sort(sortByLatest);
+  const fail = list.filter(s=>s.status==='FAILED').sort(sortByLatest);
+  const pending = list.filter(s=>s.status==='PENDING').sort(sortByLatest);
+  function fmt2(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(2) : '—';
+  }
+  function displayTime(s){
+    const ts = Number(s.resolvedAt || s.updatedAt || s.recordedTs || s.entryTs || 0);
+    return ts ? new Date(ts).toLocaleString() : '—';
+  }
   function displaySymbol(sym){
     const up = (sym||'').toUpperCase();
     if(up === 'PAXGUSDT' || up === 'PAXGUSD') return 'GOLD';
@@ -1305,19 +1332,20 @@ async function refreshSetupViews(){
     const maxHit = maxTpHit(s.hitHistory || s.hit_history || []);
     const tpParts = tps.map((v, i)=>{
       const idx = i + 1;
-      const val = (v === undefined || v === null) ? '—' : v;
+      const val = fmt2(v);
       let color = '#6b7280';
       if(mode === 'success' && maxHit >= idx) color = '#16a34a';
       if(mode === 'pending') color = '#94a3b8';
       return `<span style="color:${color}">TP${idx}: ${val}</span>`;
     });
     const slColor = mode === 'fail' ? '#ef4444' : '#6b7280';
-    return `${tpParts.join(' • ')} • <span style="color:${slColor}">SL: ${s.sl || '—'}</span>`;
+    const when = displayTime(s);
+    return `${tpParts.join(' • ')} • <span style="color:${slColor}">SL: ${fmt2(s.sl)} • ${when}</span>`;
   }
   function formatSetupCard(s, mode){
     const side = (s.side||'').toUpperCase();
     const color = side === 'BUY' ? '#16a34a' : (side === 'SELL' ? '#dc2626' : '#6b7280');
-    const entry = (s.entry === undefined || s.entry === null) ? '—' : s.entry;
+    const entry = fmt2(s.entry);
     const symbol = displaySymbol(s.symbol);
     const header = `<div style="font-weight:800;color:${color}">${symbol} ${side || 'WAIT'}: <span style="font-weight:800">${entry}</span></div>`;
     const detail = `<div>${formatTpLine(s, mode)}</div>`;
