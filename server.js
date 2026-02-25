@@ -44,6 +44,41 @@ function roundSetupPriceFields(setup){
   return out;
 }
 
+function applySymbolTpProfile(sym, setup, cid){
+  if(!setup || !sym) return setup;
+  const out = { ...setup };
+  const symbol = String(sym).toUpperCase();
+  let entry = Number(out.entry ?? out.entryPrice ?? out.entry_ts ?? NaN);
+  if(!Number.isFinite(entry) && cid && typeof cid === 'string'){
+    const parts = cid.split('|');
+    const maybe = Number(parts[parts.length - 1]);
+    if(Number.isFinite(maybe)) entry = maybe;
+  }
+  if(!Number.isFinite(entry)) return out;
+
+  const side = String(out.side || 'BUY').toUpperCase();
+  const round2 = (value) => Math.round(value * 100) / 100;
+
+  if(symbol === 'PAXGUSDT' || symbol === 'PAXGUSD'){
+    const offsets = side === 'BUY' ? [5, 10, 15, 20, 30] : [-5, -10, -15, -20, -30];
+    out.tp1 = round2(entry + offsets[0]);
+    out.tp2 = round2(entry + offsets[1]);
+    out.tp3 = round2(entry + offsets[2]);
+    out.tp4 = round2(entry + offsets[3]);
+    out.tp5 = round2(entry + offsets[4]);
+    out.entry = round2(entry);
+    return out;
+  }
+
+  if(symbol.startsWith('ETH')){
+    const offsets = side === 'BUY' ? [15,30,45,60,75] : [-15,-30,-45,-60,-75];
+    for(let i=0;i<5;i++) out['tp'+(i+1)] = round2(entry + offsets[i]);
+    if(!out.entry) out.entry = round2(entry);
+  }
+
+  return out;
+}
+
 // Build prompt from task + snapshots
 function buildPrompt(task, snapshot, fundamentals){
   return [
@@ -172,27 +207,7 @@ app.post('/api/setups', async (req,res)=>{
     return res.status(403).json({ error:'Only PAXGUSDT setups are accepted by this service' });
   }
   try{
-    function normalizeSetupForSymbol(sym, st, cid){
-      if(!st || !sym) return st;
-      const S = String(sym).toUpperCase();
-      if(!S.startsWith('ETH')) return st;
-      let entry = Number(st.entry || st.entryPrice || st.entry_ts || NaN);
-      if(!isFinite(entry) && cid && typeof cid === 'string'){
-        const parts = cid.split('|');
-        const last = parts[parts.length-1];
-        const maybe = Number(last);
-        if(isFinite(maybe)) entry = maybe;
-      }
-      if(!isFinite(entry)) return st;
-      const side = String(st.side || 'BUY').toUpperCase();
-      const offsets = side === 'BUY' ? [15,30,45,60,75] : [-15,-30,-45,-60,-75];
-      const round2 = v => Math.round(v*100)/100;
-      const out = Object.assign({}, st);
-      for(let i=0;i<5;i++){ out['tp'+(i+1)] = round2(entry + offsets[i]); }
-      if(!out.entry) out.entry = entry;
-      return out;
-    }
-    const normalized = normalizeSetupForSymbol(symbol, setup, canonical_id);
+    const normalized = applySymbolTpProfile(symbol, setup, canonical_id);
     if(normalized) Object.assign(setup, normalized);
     Object.assign(setup, roundSetupPriceFields(setup));
   }catch(e){ console.error('normalize error', e); }
@@ -217,7 +232,8 @@ app.patch('/api/setups/:canonical', async (req,res)=>{
   if(body.status){ fields.push(`status = $${idx++}`); values.push(body.status); }
   const hitHistory = normalizeJsonField(body.hitHistory, []);
   if(hitHistory !== undefined){ fields.push(`hit_history = $${idx++}::jsonb`); values.push(JSON.stringify(hitHistory)); }
-  const setupObj = roundSetupPriceFields(normalizeJsonField(body.setup, {}));
+  const setupRaw = normalizeJsonField(body.setup, {});
+  const setupObj = roundSetupPriceFields(applySymbolTpProfile(body.symbol || 'PAXGUSDT', setupRaw, canonical));
   if(setupObj !== undefined){ fields.push(`setup = $${idx++}::jsonb`); values.push(JSON.stringify(setupObj)); }
   if(body.entry_ts){ fields.push(`entry_ts = $${idx++}`); values.push(body.entry_ts); }
   if(fields.length===0) return res.status(400).json({ error:'nothing to update' });
