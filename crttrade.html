@@ -943,13 +943,13 @@ function updateCRTUI(h1Crt, m5Confirm){
         tp2 = +(entry + 10).toFixed(2);
         tp3 = +(entry + 15).toFixed(2);
         tp4 = +(entry + 20).toFixed(2);
-        tp5 = +(entry + 25).toFixed(2);
+        tp5 = +(entry + 30).toFixed(2);
       } else {
         tp1 = +(entry - 5).toFixed(2);
         tp2 = +(entry - 10).toFixed(2);
         tp3 = +(entry - 15).toFixed(2);
         tp4 = +(entry - 20).toFixed(2);
-        tp5 = +(entry - 25).toFixed(2);
+        tp5 = +(entry - 30).toFixed(2);
       }
       const tp6Raw = getLiquidityTarget(RUNTIME.historyH1, h1Crt.side, 50);
       tp6 = (tp6Raw && (h1Crt.side === 'BUY' ? tp6Raw > tp5 : tp6Raw < tp5)) ? tp6Raw : null;
@@ -974,12 +974,17 @@ function updateCRTUI(h1Crt, m5Confirm){
       );
     }
     if(m5Confirm.ok && m5Confirm.sweep){
+      const currentPrice = (RUNTIME.historyM5 && RUNTIME.historyM5.length) ? RUNTIME.historyM5[RUNTIME.historyM5.length-1].c : null;
+      if(isSignalTooLate(currentPrice, tp1, tp2, h1Crt.side)){
+        clearCachedSignal(symbol);
+      } else {
       const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=>x.toFixed(2)).join(' / ');
       const tp6Text = tp6 ? tp6.toFixed(2) : '—';
       notifyUser(symbol,
         `CRT ${h1Crt.side} on ${symbolLabel()}`,
         `Entry: ${entry.toFixed(2)} | SL: ${sl ? sl.toFixed(2) : 'Waiting'} | TPs: ${tpListText} | TP6: ${tp6Text}`
       );
+      }
     }
   } else {
     setHTML(crtDetailsEl, h1Crt.details && h1Crt.details.length ? h1Crt.details.join('<br/>') : '—');
@@ -1628,13 +1633,13 @@ async function checkAllAssetsSignals(){
     let tp3 = null, tp4 = null, tp5 = null, tp6 = null;
     if(symbol === 'PAXGUSDT'){
       if(h1Crt.side === 'BUY'){
-        tp1 = +(entry + 4).toFixed(2);
+        tp1 = +(entry + 5).toFixed(2);
         tp2 = +(entry + 10).toFixed(2);
         tp3 = +(entry + 15).toFixed(2);
         tp4 = +(entry + 20).toFixed(2);
         tp5 = +(entry + 30).toFixed(2);
       } else {
-        tp1 = +(entry - 4).toFixed(2);
+        tp1 = +(entry - 5).toFixed(2);
         tp2 = +(entry - 10).toFixed(2);
         tp3 = +(entry - 15).toFixed(2);
         tp4 = +(entry - 20).toFixed(2);
