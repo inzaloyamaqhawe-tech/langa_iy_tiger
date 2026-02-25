@@ -84,6 +84,8 @@
     <div class="flex gap-4">
       <aside class="w-56 card" id="sidebar">
         <h2 class="font-bold">Menu</h2>
+        <div class="mt-2 small" id="syncStatus">Last sync: —</div>
+        <div class="mt-2"><button id="syncNow" class="btn btn-black" style="font-size:0.85rem;padding:6px 10px">Sync Now</button></div>
         <div class="mt-4 flex flex-col gap-2">
           <button id="menuDashboard" class="btn btn-black">Dashboard</button>
           <button id="menuCRT" class="btn btn-black">CRT Trade</button>
@@ -1274,16 +1276,24 @@ function getCanonicalId(s){
   return null;
 }
 function addSetupOnce(setup){
-  const list = loadSetups();
+  // Create canonical id and attempt to push to server immediately.
   const id = getCanonicalId(setup) || `${setup.symbol}|${setup.h1_ts||setup.ts||Date.now()}`;
-  if(list.find(s=>getCanonicalId(s) === id)) return; // already recorded by canonical id
   const client = getClientId();
   const now = Date.now();
-  // Only persist locally here. Posting should occur only for confirmed (M5) setups
-  // to avoid creating "waiting"/pending server posts for unconfirmed HTF-only signals.
-  const obj = {...setup, id, status:'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: [] };
-  list.push(obj);
-  saveSetups(list);
+  const obj = {...setup, id, status: setup.status || 'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: setup.hitHistory || [] };
+  // Attempt to post to server (best-effort). Do NOT enqueue local pending — server must be authoritative.
+  (async ()=>{
+    try{
+      const res = await pushSetupToServer(obj);
+      if(res && res.dbOk){
+        try{ const body = await safeParseJson(res.dbResp); markSetupServerSynced(obj, body||null); }catch(e){}
+        // Optionally cache the server row locally for quick display, but UI will pull from server.
+        try{ const cache = loadSetups(); cache.push({...obj, serverSynced:true}); saveSetups(cache); }catch(e){}
+      } else {
+        console.warn('addSetupOnce: push to server failed for', id, res);
+      }
+    }catch(e){ console.warn('addSetupOnce push error', e); }
+  })();
   return obj;
 }
 
@@ -1409,6 +1419,15 @@ async function pushSetupToServer(s, targets={db:true,file:true}){
         markSetupServerSynced(s, body || null);
       }catch(e){ /* ignore marking errors */ }
     }
+
+    // Log push attempt for debugging: store last attempts in localStorage
+    try{
+      const logKey = 'crt_push_log_v1';
+      const entry = { id: s.id || null, ts: Date.now(), targets: targets, dbOk: !!result.dbOk, fileOk: !!result.fileOk, dbStatus: result.dbResp ? (result.dbResp.status||null) : null, fileStatus: result.fileResp ? (result.fileResp.status||null) : null };
+      try{ if(result.dbResp && result.dbResp.clone){ const t = await result.dbResp.clone().text(); entry.dbText = t && t.length>1000 ? t.slice(0,1000) : t; } }catch(e){}
+      try{ if(result.fileResp && result.fileResp.clone){ const t2 = await result.fileResp.clone().text(); entry.fileText = t2 && t2.length>1000 ? t2.slice(0,1000) : t2; } }catch(e){}
+      const raw = JSON.parse(localStorage.getItem(logKey) || '[]'); raw.unshift(entry); while(raw.length>40) raw.pop(); localStorage.setItem(logKey, JSON.stringify(raw));
+    }catch(e){ /* ignore logging errors */ }
 
     return result;
   }catch(e){ console.warn('pushSetupToServer unexpected error', e); return result; }
@@ -1544,10 +1563,13 @@ async function syncFromServer(){
     const merged = Object.values(map);
     saveSetups(merged);
     refreshSetupViews();
+    // Update sync status UI
+    try{ const el = document.getElementById('syncStatus'); if(el) el.innerText = 'Last sync: ' + new Date().toLocaleString() + ' • server rows: ' + ((server && server.length) || 0); }catch(e){}
   }catch(e){
     console.warn('sync from server failed', e);
     // fallback: keep local JSON as backup
     refreshSetupViews();
+    try{ const el = document.getElementById('syncStatus'); if(el) el.innerText = 'Last sync: failed at ' + new Date().toLocaleString(); }catch(ex){}
   }
 }
 function updateSetupStatus(id, status, reason, resolvedAt){
@@ -1587,50 +1609,41 @@ function importSetupsFile(file){
   reader.readAsText(file);
 }
 async function refreshSetupViews(){
-  // Prefer server-authoritative data when available
-  let list = loadSetups();
+  // Fetch authoritative setups from server only. Do NOT pull from localStorage.
+  let list = [];
   try{
     const server = await fetchServerSetups();
     if(server && Array.isArray(server)){
-      // Merge server rows into local list, preserving local-only entries (like queued pending)
-      const map = {};
-      // seed with local entries
-      for(const l of list){ const id = getCanonicalId(l) || l.id; if(!id) continue; map[id] = {...l, id}; }
-      // integrate server rows (server authoritative for shared fields)
-      for(const row of server){
-        const s = row.setup || row || {};
-        const id = row.canonical_id || s.id;
-        if(!id) continue;
-        const normalized = {
-          id,
-          symbol: s.symbol || row.symbol || (map[id] && map[id].symbol),
-          status: row.status || s.status || (map[id] && map[id].status) || 'PENDING',
-          origin: s.origin || row.origin || (map[id] && map[id].origin),
-          entryTs: s.entryTs || row.entry_ts || (map[id] && map[id].entryTs),
-          hitHistory: s.hitHistory || s.hit_history || row.hit_history || (map[id] && map[id].hitHistory) || [],
-          recordedTs: s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : (map[id] && map[id].recordedTs) || Date.now()),
-          entry: s.entry || (map[id] && map[id].entry),
-          sl: s.sl || (map[id] && map[id].sl),
-          tp1: s.tp1 || (map[id] && map[id].tp1),
-          tp2: s.tp2 || (map[id] && map[id].tp2),
-          tp3: s.tp3 || (map[id] && map[id].tp3),
-          tp4: s.tp4 || (map[id] && map[id].tp4),
-          tp5: s.tp5 || (map[id] && map[id].tp5),
-          tp6: s.tp6 || (map[id] && map[id].tp6),
-          ref: s.ref || (map[id] && map[id].ref)
+      // Normalize server-provided rows into client-shaped objects
+      list = server.map(row => {
+        const s = row.setup && typeof row.setup === 'object' ? { ...row.setup } : (row || {});
+        // server may already provide top-level fields; normalize them
+        return {
+          id: row.canonical_id || s.id || s.canonical_id || null,
+          symbol: s.symbol || row.symbol || (s.setup && s.setup.symbol) || null,
+          status: row.status || s.status || 'PENDING',
+          origin: s.origin || row.origin || null,
+          entryTs: s.entryTs || row.entry_ts || s.entry_ts || null,
+          recordedTs: s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : null) || null,
+          entry: s.entry || s.tp1 || null,
+          sl: s.sl || null,
+          tp1: s.tp1 || null,
+          tp2: s.tp2 || null,
+          tp3: s.tp3 || null,
+          tp4: s.tp4 || null,
+          tp5: s.tp5 || null,
+          tp6: s.tp6 || null,
+          hitHistory: s.hitHistory || s.hit_history || []
         };
-        map[id] = { ...(map[id] || {}), ...normalized };
-      }
-      // re-insert queued pending posts so they remain visible locally until delivered
-      try{
-        const queued = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
-        for(const q of queued){ const qsetup = q.setup || q; const id = getCanonicalId(qsetup) || qsetup.id; if(!id) continue; if(!map[id]) map[id] = {...qsetup, id}; }
-      }catch(e){ /* ignore queued read errors */ }
-      list = Object.values(map);
-      // persist merged view locally
-      saveSetups(list);
+      });
+    } else {
+      // server returned no data — keep list empty to remain authoritative
+      list = [];
     }
-  }catch(e){ /* fallback to local */ }
+  }catch(e){
+    console.warn('refreshSetupViews: failed to fetch server setups', e);
+    list = [];
+  }
   const success = list.filter(s=>s.status==='SUCCESS');
   const fail = list.filter(s=>s.status==='FAILED');
   const pending = list.filter(s=>s.status==='PENDING');
@@ -1641,7 +1654,7 @@ async function refreshSetupViews(){
     const hits = Array.isArray(s.hitHistory) ? s.hitHistory.map(h=> (h.type||'').toString().toUpperCase() ).filter(Boolean) : [];
     let maxHit = 0;
     for(const h of hits){ const m = h.match(/TP(\d+)/); if(m && m[1]) maxHit = Math.max(maxHit, parseInt(m[1],10)); }
-    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5];
+    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5,s.tp6];
     const tpHtml = tps.map((tp, idx)=>{
       if(!tp) return '';
       const hit = (idx+1) <= maxHit;
@@ -1649,23 +1662,25 @@ async function refreshSetupViews(){
       return `<span style="color:${color}">TP${idx+1}: ${Number(tp).toFixed(2)}</span>`;
     }).filter(Boolean).join(' • ');
     const slHtml = `<span style="color:#334155">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
+    const dateStr = s.recordedTs ? new Date(s.recordedTs).toLocaleString() : '';
     return `<div class="list-item">`+
       `<div style="display:flex;flex-direction:column;gap:6px">`+
         `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
-        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
+        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}${dateStr? ' • ' + dateStr : ''}</div>`+
       `</div>`+
     `</div>`;
   }).join('') : '—');
   document.getElementById('failList').innerHTML = (fail.length ? fail.map(s=>{
     const side = (s.side||'').toUpperCase();
     const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
-    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5];
+    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5,s.tp6];
     const tpHtml = tps.map((tp, idx)=> tp ? `<span style="color:#94a3b8">TP${idx+1}: ${Number(tp).toFixed(2)}</span>` : '').filter(Boolean).join(' • ');
     const slHtml = `<span style="color:#ef4444">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
+    const dateStr = s.recordedTs ? new Date(s.recordedTs).toLocaleString() : '';
     return `<div class="list-item">`+
       `<div style="display:flex;flex-direction:column;gap:6px">`+
         `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
-        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
+        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}${dateStr? ' • ' + dateStr : ''}</div>`+
       `</div>`+
     `</div>`;
   }).join('') : '—');
@@ -1673,13 +1688,14 @@ async function refreshSetupViews(){
   if(pendingEl) pendingEl.innerHTML = (pending.length ? pending.map(s=>{
     const side = (s.side||'').toUpperCase();
     const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
-    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5];
+    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5,s.tp6];
     const tpHtml = tps.map((tp, idx)=> tp ? `<span>TP${idx+1}: ${Number(tp).toFixed(2)}</span>` : '').filter(Boolean).join(' • ');
     const slHtml = `<span>SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
+    const dateStr = s.recordedTs ? new Date(s.recordedTs).toLocaleString() : '';
     return `<div class="list-item">`+
       `<div style="display:flex;flex-direction:column;gap:6px">`+
         `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
-        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
+        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}${dateStr? ' • ' + dateStr : ''}</div>`+
       `</div>`+
     `</div>`;
   }).join('') : '—');
@@ -1764,10 +1780,9 @@ async function fetchServerSetups(){
   }catch(e){ /* continue to fallback */ }
   try{
     // Final fallback: localStorage client copy
-    const raw = JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || '[]');
-    if(!Array.isArray(raw)) return null;
-    // Convert client setups to row-like objects
-    return raw.map(s => ({ canonical_id: s.id || s.canonical_id, symbol: s.symbol, setup: s, status: s.status || 'PENDING', entry_ts: s.entryTs || s.entry_ts || null, hit_history: s.hitHistory || s.hit_history || [], created_at: s.recordedTs? new Date(s.recordedTs).toISOString():null }));
+    // Do NOT fall back to localStorage — server must be authoritative.
+    // Return empty array when no server/file data is available so clients remain in sync.
+    return [];
   }catch(e){ return null; }
 }
 
@@ -2147,6 +2162,9 @@ document.getElementById('pushPending').addEventListener('click', async ()=>{
   }catch(e){ alert('JSON sync error: ' + String(e)); }
   try{ await refreshSetupViews(); }catch(e){}
 });
+// manual sync button
+const syncBtn = document.getElementById('syncNow');
+if(syncBtn){ syncBtn.addEventListener('click', async ()=>{ try{ const el = document.getElementById('syncStatus'); if(el) el.innerText = 'Syncing...'; await syncFromServer(); const el2 = document.getElementById('syncStatus'); if(el2) el2.innerText = 'Last sync: ' + new Date().toLocaleString(); alert('Sync complete'); }catch(e){ alert('Sync failed: '+String(e)); } }); }
   function showView(id){
     // hide all
     ['viewDashboard','viewCRT','viewPending','viewSuccess','viewFail'].forEach(v=>{ const el = document.getElementById(v); if(el) el.style.display = 'none'; });
