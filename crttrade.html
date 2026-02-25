@@ -180,7 +180,7 @@
                 <div id="candleCloseInfo_view" class="small">Candle closes at: —</div>
               </div>
             </div>
-            <div id="chartArea_view" class="mt-3 canvas-wrap"><canvas id="mainChart_view" class="chart-canvas"></canvas></div>
+            <div id="chartArea_view" class="mt-3 canvas-wrap"><canvas id="mainChart" class="chart-canvas"></canvas></div>
             <div class="mt-2 small muted">CRT-only entries. Alerts only when valid CRT is detected.</div>
           </div>
 
@@ -469,6 +469,79 @@ function drawMainChart(updateOnly=false){
     }
   };
 
+  // Custom plugin to render 3D-styled candlesticks (body with gradient, subtle shadow, thin wicks)
+  const candle3dPlugin = {
+    id: 'candle3dPlugin',
+    afterDatasetDraw(chart){
+      try{
+        const ctx = chart.ctx;
+        const ds = chart.data.datasets && chart.data.datasets[0];
+        if(!ds || (!ds.data) ) return;
+        const xScale = chart.scales.x;
+        const yScale = chart.scales.y;
+        const count = ds.data.length || 1;
+        const baseWidth = Math.max(4, Math.min(18, (chart.width || 600) / Math.max(20, count) * 0.7));
+        for(let i=0;i<ds.data.length;i++){
+          const v = ds.data[i];
+          const t = v.t || v.x || (v.time || i);
+          const x = xScale.getPixelForValue(t);
+          const open = (typeof v.o !== 'undefined')? v.o : v.open;
+          const close = (typeof v.c !== 'undefined')? v.c : v.close;
+          const high = (typeof v.h !== 'undefined')? v.h : v.high;
+          const low = (typeof v.l !== 'undefined')? v.l : v.low;
+          if(open == null || close == null || high == null || low == null) continue;
+          const openY = yScale.getPixelForValue(open);
+          const closeY = yScale.getPixelForValue(close);
+          const highY = yScale.getPixelForValue(high);
+          const lowY = yScale.getPixelForValue(low);
+          const top = Math.min(openY, closeY);
+          const height = Math.max(1, Math.abs(closeY - openY));
+          const w = baseWidth;
+          const left = Math.round(x - w/2);
+          // draw body with shadow and gradient
+          ctx.save();
+          ctx.beginPath();
+          ctx.shadowColor = 'rgba(2,6,23,0.12)';
+          ctx.shadowBlur = 8;
+          const isUp = (close >= open);
+          const grad = ctx.createLinearGradient(left, top, left, top + height + 2);
+          if(isUp){ grad.addColorStop(0, 'rgba(16,185,129,0.98)'); grad.addColorStop(1, 'rgba(16,185,129,0.78)'); }
+          else { grad.addColorStop(0, 'rgba(239,68,68,0.98)'); grad.addColorStop(1, 'rgba(239,68,68,0.78)'); }
+          if(height < 2){
+            // doji or very small body: draw a horizontal pill
+            ctx.fillStyle = grad;
+            ctx.strokeStyle = isUp ? '#065f46' : '#991b1b';
+            ctx.lineWidth = 1;
+            ctx.fillRect(left, top - 1, w, 2);
+            ctx.strokeRect(left, top - 1, w, 2);
+          } else {
+            ctx.fillStyle = grad;
+            ctx.strokeStyle = isUp ? '#065f46' : '#991b1b';
+            ctx.lineWidth = 1;
+            ctx.fillRect(left, top, w, height);
+            ctx.strokeRect(left, top, w, height);
+            // subtle top highlight
+            ctx.fillStyle = 'rgba(255,255,255,0.22)';
+            ctx.fillRect(left + 1, top + 1, w - 2, Math.min(6, Math.max(2, height/4)));
+          }
+          // draw wicks (no shadow)
+          ctx.shadowColor = 'transparent';
+          ctx.beginPath();
+          ctx.strokeStyle = isUp ? '#065f46' : '#991b1b';
+          ctx.lineWidth = 1.2;
+          // upper wick
+          ctx.moveTo(x, highY);
+          ctx.lineTo(x, top);
+          // lower wick
+          ctx.moveTo(x, top + height);
+          ctx.lineTo(x, lowY);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }catch(e){ /* ignore paint errors */ }
+    }
+  };
+
   try {
     RUNTIME.chart = new Chart(ctx, {
       type: (RUNTIME.chartType === 'line') ? 'line' : 'candlestick',
@@ -489,7 +562,7 @@ function drawMainChart(updateOnly=false){
           y: { position: 'right', ticks: { color: '#9fb0cc' }, grid: { color: '#122033' } }
         }
       },
-      plugins: [setupOverlayPlugin]
+      plugins: [setupOverlayPlugin, candle3dPlugin]
     });
     attachPanWheel();
   } catch (e) {
@@ -515,7 +588,7 @@ function drawMainChart(updateOnly=false){
           y: { position: 'right', ticks: { color: '#9fb0cc' }, grid: { color: '#122033' } }
         }
       },
-      plugins: [setupOverlayPlugin]
+      plugins: [setupOverlayPlugin, candle3dPlugin]
     });
     attachPanWheel();
   }
