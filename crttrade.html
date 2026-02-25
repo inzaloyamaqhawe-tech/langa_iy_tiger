@@ -1646,15 +1646,14 @@ async function refreshSetupViews(){
       if(!tp) return '';
       const hit = (idx+1) <= maxHit;
       const color = hit ? '#10b981' : '#64748b';
-      return `<span style="color:${color};font-weight:${hit?700:400}">TP${idx+1}: ${Number(tp).toFixed(2)}</span>`;
+      return `<span style="color:${color}">TP${idx+1}: ${Number(tp).toFixed(2)}</span>`;
     }).filter(Boolean).join(' • ');
     const slHtml = `<span style="color:#334155">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
     return `<div class="list-item">`+
       `<div style="display:flex;flex-direction:column;gap:6px">`+
-        `<div style="font-weight:800;color:${headerColor};font-size:1rem">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
+        `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
         `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
       `</div>`+
-      `<div class="small" style="color:${headerColor}">[${side||'SUCCESS'}]</div>`+
     `</div>`;
   }).join('') : '—');
   document.getElementById('failList').innerHTML = (fail.length ? fail.map(s=>{
@@ -1662,13 +1661,12 @@ async function refreshSetupViews(){
     const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
     const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5];
     const tpHtml = tps.map((tp, idx)=> tp ? `<span style="color:#94a3b8">TP${idx+1}: ${Number(tp).toFixed(2)}</span>` : '').filter(Boolean).join(' • ');
-    const slHtml = `<span style="color:#ef4444;font-weight:700">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
+    const slHtml = `<span style="color:#ef4444">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
     return `<div class="list-item">`+
       `<div style="display:flex;flex-direction:column;gap:6px">`+
-        `<div style="font-weight:800;color:${headerColor};font-size:1rem">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
+        `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
         `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
       `</div>`+
-      `<div class="small" style="color:#ef4444">[SL]</div>`+
     `</div>`;
   }).join('') : '—');
   const pendingEl = document.getElementById('pendingList');
@@ -1680,10 +1678,9 @@ async function refreshSetupViews(){
     const slHtml = `<span>SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
     return `<div class="list-item">`+
       `<div style="display:flex;flex-direction:column;gap:6px">`+
-        `<div style="font-weight:800;color:${headerColor};font-size:1rem">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
+        `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
         `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
       `</div>`+
-      `<div class="small" style="color:${headerColor}">[${side||'PENDING'}]</div>`+
     `</div>`;
   }).join('') : '—');
   // Instead of showing raw "pending" waiting setups, display only confirmed/active setups here.
