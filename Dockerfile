@@ -4,6 +4,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 COPY server.js crttrade.html ./
+COPY inzalo_ymq.jpg ./
+COPY 20240626_205410.jpg ./
 # Redeploy stamp: 2026-02-23T12:00:00Z - bump to force redeploy
 EXPOSE 3000
 ENV PORT=3000
