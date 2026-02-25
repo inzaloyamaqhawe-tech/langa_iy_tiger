@@ -660,6 +660,26 @@ function candleBodyPct(c){
   return body / range;
 }
 
+function isDojiCandle(c, maxBodyPct=0.1){
+  if(!c) return false;
+  return candleBodyPct(c) <= maxBodyPct;
+}
+
+function hammerDirection(c){
+  if(!c) return null;
+  const range = Math.max(1e-9, c.h - c.l);
+  const body = Math.abs(c.c - c.o);
+  const upperWick = c.h - Math.max(c.o, c.c);
+  const lowerWick = Math.min(c.o, c.c) - c.l;
+  const bodyPct = body / range;
+  if(bodyPct > 0.4) return null;
+  const upperPct = upperWick / range;
+  const lowerPct = lowerWick / range;
+  if(lowerPct >= 0.45 && upperPct <= 0.2) return 'LOWER';
+  if(upperPct >= 0.45 && lowerPct <= 0.2) return 'UPPER';
+  return null;
+}
+
 // --- CRT validation helpers ---
 function roundToTick(v, symbol){
   const tick = getPipSize(symbol) || 1;
@@ -739,6 +759,8 @@ function analyzeCRTWithData(data){
   }
   const c1 = closed[closed.length-2];
   const c2 = closed[closed.length-1];
+  const c1Index = closed.length - 2;
+  const c2Index = closed.length - 1;
   // age check: ignore HTF reference older than configured hours
   const HTF_MAX_AGE_HOURS = 24;
   if(Date.now() - c1.t > HTF_MAX_AGE_HOURS * 3600 * 1000){
@@ -762,6 +784,24 @@ function analyzeCRTWithData(data){
   const closeInside = c2.c < crh && c2.c > crl;
   const closeOutside = c2.c > crh || c2.c < crl;
   details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
+
+  // Hard rule 1: if HTF C2 closes beyond C1 range, CRT is INVALID.
+  if(closeOutside){
+    return {status:'INVALID CRT', side:'—', reason:'C2 closed beyond C1 range (hard invalidation).', details, range:{high:crh, low:crl, mid}};
+  }
+
+  // Hard rule 2: if any candle between C1 and C2 is doji, CRT is INVALID.
+  const between = closed.slice(c1Index + 1, c2Index);
+  if(between.some(c => isDojiCandle(c, 0.1))){
+    return {status:'INVALID CRT', side:'—', reason:'Doji detected between C1 and C2 (hard invalidation).', details, range:{high:crh, low:crl, mid}};
+  }
+
+  // Hard rule 3: if C1 and C2 are hammers with opposite wick direction, CRT is INVALID.
+  const c1Hammer = hammerDirection(c1);
+  const c2Hammer = hammerDirection(c2);
+  if(c1Hammer && c2Hammer && c1Hammer !== c2Hammer){
+    return {status:'INVALID CRT', side:'—', reason:'C1/C2 opposite-direction hammer rejection (hard invalidation).', details, range:{high:crh, low:crl, mid}};
+  }
 
   // handle ambiguous dual-sweep by preferring dominant sweep if clear
   if(sweepHigh && sweepLow){
