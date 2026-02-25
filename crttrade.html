@@ -4,6 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Langa CRT Trade — PAXGUSD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
 <!-- Tailwind for quick styling -->
 <script src="https://cdn.tailwindcss.com"></script>
@@ -16,12 +19,22 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
 
 <style>
-  :root{ --bg:#f4f8ff; --card:#ffffff; --muted:#6b7280; --accent:#2563eb; }
+  :root{
+    --bg:#f6f7fb;
+    --bg-accent:#eef3ff;
+    --card:#ffffff;
+    --border:#e4e9f2;
+    --muted:#6b7280;
+    --text:#0f172a;
+    --accent:#1d4ed8;
+    --accent-soft:#dbe7ff;
+    --shadow:0 12px 30px rgba(15,23,42,0.08);
+  }
   /* Light dashboard styles for laptop view */
-  .light-dashboard{ background:#f8fafc; color:#071127; border-radius:12px; padding:18px; }
-  .light-card{ background:#ffffff; color:#071127; border:1px solid #e6eef8; padding:14px; border-radius:10px; }
+  .light-dashboard{ background:#ffffff; color:var(--text); border-radius:16px; padding:20px; box-shadow:var(--shadow); }
+  .light-card{ background:#ffffff; color:var(--text); border:1px solid var(--border); padding:16px; border-radius:12px; box-shadow:0 6px 14px rgba(15,23,42,0.05); }
   .kpi-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
-  .kpi-value{ font-size:1.6rem; font-weight:700; color:#071127; }
+  .kpi-value{ font-size:1.6rem; font-weight:700; color:var(--text); }
   .kpi-label{ color:#6b7280; font-size:0.9rem; }
   .badge-buy{ background:#dcfce7; color:#065f46; padding:6px 10px; border-radius:999px; font-weight:700 }
   .badge-sell{ background:#fee2e2; color:#991b1b; padding:6px 10px; border-radius:999px; font-weight:700 }
@@ -35,18 +48,29 @@
   /* dashboard chart card sizing */
   #dashboardSuccessChart{ width:100% !important; height:180px !important }
   html,body{height:100%}
-  body{background:var(--bg); color:#111827; font-family:Inter,system-ui,Arial; margin:0; padding:18px;}
-  .card{background:var(--card); border:1px solid #e5e7eb; padding:14px; border-radius:12px;}
-  .btn{padding:8px 12px; border-radius:8px; font-weight:600; cursor:pointer}
-  .btn-navy{background:var(--accent); color:white}
-  .btn-black{background:#ffffff;border:1px solid #cbd5f5;color:#111827}
-  .select, .input { background:#ffffff; color:#111827; padding:8px 10px; border-radius:8px; border:1px solid #dbe5f7; width:100%}
-  .small{font-size:.85rem; color:#6b7280}
-  .tag{background:#ffffff;padding:8px;border-radius:8px;border:1px solid #e5e7eb}
+  body{
+    background:
+      radial-gradient(1200px 600px at 10% -10%, var(--bg-accent), transparent 60%),
+      radial-gradient(800px 500px at 90% 10%, #f1f5ff, transparent 55%),
+      linear-gradient(180deg, var(--bg) 0%, #ffffff 100%);
+    color:var(--text);
+    font-family:'Manrope','Space Grotesk',sans-serif;
+    margin:0;
+    padding:18px;
+  }
+  h1,h2,h3{ font-family:'Space Grotesk','Manrope',sans-serif; letter-spacing:-0.01em; }
+  .card{background:var(--card); border:1px solid var(--border); padding:16px; border-radius:14px; box-shadow:0 8px 18px rgba(15,23,42,0.06);}
+  .btn{padding:8px 12px; border-radius:10px; font-weight:600; cursor:pointer; transition:transform .08s ease, box-shadow .2s ease}
+  .btn:active{ transform:translateY(1px); }
+  .btn-navy{background:var(--accent); color:white; box-shadow:0 8px 16px rgba(29,78,216,0.2)}
+  .btn-black{background:#ffffff;border:1px solid var(--border);color:var(--text)}
+  .select, .input { background:#ffffff; color:var(--text); padding:8px 10px; border-radius:10px; border:1px solid var(--border); width:100%}
+  .small{font-size:.85rem; color:var(--muted)}
+  .tag{background:#ffffff;padding:10px;border-radius:10px;border:1px solid var(--border)}
   #chartArea{ width:14cm; height:7.6cm; margin:0 auto; }
   canvas{ max-width:100%; height:100% !important; width:100% !important; }
   .list-scroll{max-height:20rem; overflow:auto}
-  .list-item{padding:10px 0; min-height:40px; display:flex;align-items:center}
+  .list-item{padding:12px 0; min-height:40px; display:flex;align-items:center}
   .muted { color:#6b7280; font-size:0.9rem }
 </style>
 </head>
@@ -470,7 +494,7 @@ function drawMainChart(updateOnly=false){
           legend: { labels: { color:'#64748b' } },
           zoom: {
             pan: { enabled: true, mode: 'x', onPanComplete(){ RUNTIME.userZoomed = true; } },
-            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, drag: { enabled: true }, mode: 'x', onZoomComplete(){ RUNTIME.userZoomed = true; } },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, drag: { enabled: false }, mode: 'x', onZoomComplete(){ RUNTIME.userZoomed = true; } },
             limits: { x: { min: visibleMin, max: visibleMax } }
           }
         },
@@ -496,7 +520,7 @@ function drawMainChart(updateOnly=false){
           legend: { labels: { color:'#64748b' } },
           zoom: {
             pan: { enabled: true, mode: 'x', onPanComplete(){ RUNTIME.userZoomed = true; } },
-            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, drag: { enabled: true }, mode: 'x', onZoomComplete(){ RUNTIME.userZoomed = true; } },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, drag: { enabled: false }, mode: 'x', onZoomComplete(){ RUNTIME.userZoomed = true; } },
             limits: { x: { min: visibleMin, max: visibleMax } }
           }
         },
