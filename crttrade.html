@@ -684,57 +684,51 @@ function analyzeCRTWithData(data){
   if(closed.length < 3){
     return {status:'WAITING', side:'—', reason:'Not enough closed candles', details:[]};
   }
+
   const c1 = closed[closed.length-2];
   const c2 = closed[closed.length-1];
-  // age check: ignore HTF reference older than configured hours
-  const HTF_MAX_AGE_HOURS = 24;
-  if(Date.now() - c1.t > HTF_MAX_AGE_HOURS * 3600 * 1000){
-    return {status:'INVALID CRT', side:'—', reason:'H1 reference candle too old', details:[]};
-  }
-
+  // Rule: ignore setup if any HTF candle between C1 and C2 is a doji (indecisive)
+  try{
+    const allIdx = (data || []).map((x,i)=>({t:x.t, i}));
+    const idx1 = data.findIndex(x=>x.t === c1.t);
+    const idx2 = data.findIndex(x=>x.t === c2.t);
+    if(idx1 >=0 && idx2 >=0 && Math.abs(idx2 - idx1) > 1){
+      const start = Math.min(idx1, idx2)+1;
+      const end = Math.max(idx1, idx2)-1;
+      for(let k=start;k<=end;k++){
+        const mid = data[k];
+        if(mid){
+          const bodyPct = candleBodyPct(mid);
+          if(bodyPct < 0.15){
+            return {status:'INVALID CRT', side:'—', reason:'Indecisive/doji candle present between C1 and C2 (HTF).', details};
+          }
+        }
+      }
+    }
+  }catch(e){ console.warn('doji check failed', e); }
   const crh = c1.h;
   const crl = c1.l;
   const mid = (crh + crl) / 2;
 
   const details = [];
-  details.push(`H1 C1 (Reference, 2nd last CLOSED) @ ${new Date(c1.t).toLocaleString()} — CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
-  details.push(`H1 C2 (Manipulation, last CLOSED) @ ${new Date(c2.t).toLocaleString()} — O:${c2.o.toFixed(2)} H:${c2.h.toFixed(2)} L:${c2.l.toFixed(2)} C:${c2.c.toFixed(2)}`);
+  details.push(`H1 C1 (Reference) @ ${new Date(c1.t).toLocaleString()} — CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
+  details.push(`H1 C2 (Manipulation) @ ${new Date(c2.t).toLocaleString()} — O:${c2.o.toFixed(2)} H:${c2.h.toFixed(2)} L:${c2.l.toFixed(2)} C:${c2.c.toFixed(2)}`);
 
-  const sweepInfo = isSweepWithTolerance(c2, crh, crl, 0.02);
-  let sweepHigh = sweepInfo.sweepHigh;
-  let sweepLow = sweepInfo.sweepLow;
+  const sweepHigh = c2.h > crh;
+  const sweepLow = c2.l < crl;
   const closeInside = c2.c < crh && c2.c > crl;
   const closeOutside = c2.c > crh || c2.c < crl;
-  details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
 
-  if(sweepHigh && sweepLow){
-    const dominant = (sweepInfo.highEx > sweepInfo.lowEx) ? 'HIGH' : 'LOW';
-    if(Math.abs(sweepInfo.highEx - sweepInfo.lowEx) < 0.015){
-      sweepHigh = false; sweepLow = false;
-    } else if(dominant === 'HIGH') { sweepHigh = true; sweepLow = false; }
-    else { sweepLow = true; sweepHigh = false; }
+  if(closeOutside){
+    return {status:'INVALID CRT', side:'—', reason:'C2 closed outside C1 range (breakout, not manipulation).', details, range:{high:crh, low:crl, mid}};
   }
 
-  // compute checks (closeInside is mandatory)
-  const checks = [];
-  const impulseOk = isCleanImpulse(c1);
-  const compressionOk = precededByCompression(closed);
-  const sweepOk = (sweepHigh || sweepLow);
-  const crosses = countMidpointCrosses(closed, mid, 12);
-  const midpointOk = crosses < 4;
-  checks.push(impulseOk, compressionOk, sweepOk, midpointOk, closeInside);
-
-  const passed = checks.filter(Boolean).length;
-  const total = checks.length;
-  const pct = passed / total;
-
-  details.push(`CRT score: ${passed}/${total} (${Math.round(pct*100)}%) — C2 must close inside; currently ${closeInside ? 'OK' : 'NOT OK'}`);
+  if(!(sweepHigh || sweepLow)){
+    return {status:'WAITING', side:'—', reason:'No liquidity sweep beyond CRH/CRL on C2.', details, range:{high:crh, low:crl, mid}};
+  }
 
   if(!closeInside){
     return {status:'INVALID CRT', side:'—', reason:'C2 did not close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
-  }
-  if(pct < 0.6){
-    return {status:'WAITING', side:'—', reason:`CRT checks insufficient (${passed}/${total}).`, details, range:{high:crh, low:crl, mid}};
   }
 
   const side = sweepHigh ? 'SELL' : 'BUY';
@@ -1035,6 +1029,33 @@ async function updateLiveAndCRT(force=false){
     ? confirmM5WithH1(RUNTIME.historyM5, h1Crt)
     : {ok:false, reason:'Waiting for H1 setup.'};
   updateCRTUI(h1Crt, m5Confirm);
+  // If M5 confirms the H1 setup, ensure we record and attempt to post immediately.
+  try{
+    if(m5Confirm && m5Confirm.ok && h1Crt && h1Crt.status === 'VALID CRT SETUP'){
+      const h1_ts = (h1Crt && h1Crt.ref && h1Crt.ref.t) ? h1Crt.ref.t : (RUNTIME.historyH1 && RUNTIME.historyH1.length>1 ? RUNTIME.historyH1[RUNTIME.historyH1.length-2].t : Date.now());
+      const cid = `${RUNTIME.symbol}|${h1_ts}`;
+      const existing = loadSetups().find(s=>getCanonicalId(s) === cid || s.id === cid);
+      if(!existing){
+        const entry = m5Confirm.entry || h1Crt.range.mid;
+        const setupObj = { symbol: RUNTIME.symbol, side: h1Crt.side, entry, sl: getFixedSL(RUNTIME.symbol, entry, h1Crt.side), tp1: h1Crt.range.mid, tp2: h1Crt.side === 'BUY' ? h1Crt.range.high : h1Crt.range.low, h1_ts, ref: h1Crt.ref };
+        // additional TPs if present on h1Crt or m5Confirm
+        if(m5Confirm && m5Confirm.zone){ setupObj.zone = m5Confirm.zone; }
+        addSetupOnce(setupObj);
+        console.info('Recorded setup on M5 confirmation', cid);
+      } else {
+        // existing local setup found — if not serverSynced try to push again
+        if(existing && !existing.serverSynced){
+          try{
+            const res = await pushSetupToServer(existing);
+            console.info('Retried push for existing setup', cid, res);
+            if(res && res.dbOk && typeof markSetupServerSynced === 'function'){
+              try{ const body = res.dbResp && res.dbResp.clone && await safeParseJson(res.dbResp); markSetupServerSynced(existing, body||null); }catch(e){}
+            }
+          }catch(e){ console.warn('Retry push error', e); }
+        }
+      }
+    }
+  }catch(e){ console.warn('auto-record on confirm failed', e); }
 }
 
 function cacheSignal(symbol, payload){
