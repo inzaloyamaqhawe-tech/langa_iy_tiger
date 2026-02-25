@@ -263,6 +263,8 @@ let RUNTIME = {
   notifyTimer: null
 };
 
+const VISIBLE_CANDLE_COUNT = 150;
+
 const NOTIFY = {
   enabled: false,
   lastBySymbol: {},
@@ -358,12 +360,17 @@ function drawMainChart(updateOnly=false){
   const labels = d.map(x=>x.t);
   const candlesticks = d.map(x=>({x:x.t, o:x.o, h:x.h, l:x.l, c:x.c}));
   const lineData = d.map(x=>({x:x.t, y:x.c}));
+  const visibleStartIndex = Math.max(0, d.length - VISIBLE_CANDLE_COUNT);
+  const visibleMin = d[visibleStartIndex] ? d[visibleStartIndex].t : null;
+  const visibleMax = d[d.length - 1] ? d[d.length - 1].t : null;
 
   if(RUNTIME.chart && updateOnly){
     RUNTIME.chart.data.labels = labels;
     RUNTIME.chart.data.datasets.forEach(ds=>{
       if(ds.id === 'price') ds.data = (RUNTIME.chartType === 'line') ? lineData : candlesticks;
     });
+    RUNTIME.chart.options.scales.x.min = visibleMin;
+    RUNTIME.chart.options.scales.x.max = visibleMax;
     RUNTIME.chart.update('none');
     return;
   }
@@ -371,9 +378,74 @@ function drawMainChart(updateOnly=false){
   if(RUNTIME.chart) RUNTIME.chart.destroy();
 
   const datasets = [
-    (RUNTIME.chartType === 'line') ? { id:'price', label:'Price', data: lineData, type:'line', borderColor:'#3b82f6', pointRadius:0, borderWidth:1.4 } :
-    { id:'price', label:'Price', data: candlesticks }
+    (RUNTIME.chartType === 'line')
+      ? { id:'price', label:'Price', data: lineData, type:'line', borderColor:'#3b82f6', pointRadius:0, borderWidth:1.4 }
+      : { id:'price', label:'Price', data: candlesticks, color: '#64748b', borderColor: '#475569', upColor:'#10b981', downColor:'#ef4444', borderUpColor:'#0f766e', borderDownColor:'#b91c1c' }
   ];
+
+  const candle3dPlugin = {
+    id: 'candlestick3d',
+    afterDatasetsDraw(chart){
+      if(chart.config.type !== 'candlestick') return;
+      const meta = chart.getDatasetMeta(0);
+      if(!meta || !meta.data) return;
+      const ctx2 = chart.ctx;
+      ctx2.save();
+      for(const el of meta.data){
+        try{
+          const p = el.getProps(['x','open','close','high','low','width'], true);
+          const width = Math.max(6, p.width || 7);
+          const bodyTop = Math.min(p.open, p.close);
+          const bodyBottom = Math.max(p.open, p.close);
+          const bodyHeight = Math.max(2, bodyBottom - bodyTop);
+          const isUp = p.close < p.open;
+          const depth = Math.max(2, Math.round(width * 0.3));
+
+          const faceMain = isUp ? '#22c55e' : '#ef4444';
+          const faceDark = isUp ? '#166534' : '#7f1d1d';
+          const faceLight = isUp ? '#86efac' : '#fca5a5';
+          const edge = isUp ? '#15803d' : '#b91c1c';
+
+          // Right side face
+          ctx2.fillStyle = faceDark;
+          ctx2.beginPath();
+          ctx2.moveTo(p.x + width / 2, bodyTop);
+          ctx2.lineTo(p.x + width / 2 + depth, bodyTop - depth);
+          ctx2.lineTo(p.x + width / 2 + depth, bodyBottom - depth);
+          ctx2.lineTo(p.x + width / 2, bodyBottom);
+          ctx2.closePath();
+          ctx2.fill();
+
+          // Top face
+          ctx2.fillStyle = faceLight;
+          ctx2.beginPath();
+          ctx2.moveTo(p.x - width / 2, bodyTop);
+          ctx2.lineTo(p.x + width / 2, bodyTop);
+          ctx2.lineTo(p.x + width / 2 + depth, bodyTop - depth);
+          ctx2.lineTo(p.x - width / 2 + depth, bodyTop - depth);
+          ctx2.closePath();
+          ctx2.fill();
+
+          // Front face with gradient
+          const grad = ctx2.createLinearGradient(p.x - width / 2, bodyTop, p.x + width / 2, bodyTop);
+          grad.addColorStop(0, faceDark);
+          grad.addColorStop(0.45, faceMain);
+          grad.addColorStop(1, faceLight);
+          ctx2.fillStyle = grad;
+          ctx2.fillRect(p.x - width / 2, bodyTop, width, bodyHeight);
+
+          // Wicks (draw above faces)
+          ctx2.strokeStyle = edge;
+          ctx2.lineWidth = 1;
+          ctx2.beginPath();
+          ctx2.moveTo(p.x, p.high);
+          ctx2.lineTo(p.x, p.low);
+          ctx2.stroke();
+        }catch(e){ /* no-op */ }
+      }
+      ctx2.restore();
+    }
+  };
 
   try{
     RUNTIME.chart = new Chart(ctx, {
@@ -382,24 +454,20 @@ function drawMainChart(updateOnly=false){
       options: {
         maintainAspectRatio:false,
         animation:false,
-        plugins: { legend:{ labels:{ color:'#cfe6ff' } } },
         parsing: false,
         plugins: {
-          legend: { labels: { color:'#cfe6ff' } },
+          legend: { labels: { color:'#64748b' } },
           zoom: {
-            pan: { enabled: true, mode: 'x' },
-            zoom: {
-              wheel: { enabled: true },
-              pinch: { enabled: true },
-              mode: 'x'
-            }
+            pan: { enabled: false, mode: 'x' },
+            zoom: { wheel: { enabled: false }, pinch: { enabled: false }, drag: { enabled: false }, mode: 'x' }
           }
         },
         scales: {
-          x: { type:'time', ticks:{ color:'#9fb0cc' } },
-          y: { position:'right', ticks:{ color:'#9fb0cc' }, grid:{ color:'#122033' } }
+          x: { type:'time', ticks:{ color:'#94a3b8' }, grid:{ color:'#e5e7eb' }, min: visibleMin, max: visibleMax },
+          y: { position:'right', ticks:{ color:'#94a3b8' }, grid:{ color:'#e5e7eb' } }
         }
-      }
+      },
+      plugins: [candle3dPlugin]
     });
     attachPanWheel();
   }catch(e){
@@ -413,20 +481,16 @@ function drawMainChart(updateOnly=false){
         maintainAspectRatio:false,
         animation:false,
         plugins: {
-          legend: { labels: { color:'#cfe6ff' } },
+          legend: { labels: { color:'#64748b' } },
           zoom: {
-            pan: { enabled: true, mode: 'x' },
-            zoom: {
-              wheel: { enabled: true },
-              pinch: { enabled: true },
-              mode: 'x'
-            }
+            pan: { enabled: false, mode: 'x' },
+            zoom: { wheel: { enabled: false }, pinch: { enabled: false }, drag: { enabled: false }, mode: 'x' }
           }
         },
         parsing: false,
         scales: {
-          x: { type:'time', ticks:{ color:'#9fb0cc' } },
-          y: { position:'right', ticks:{ color:'#9fb0cc' }, grid:{ color:'#122033' } }
+          x: { type:'time', ticks:{ color:'#94a3b8' }, grid:{ color:'#e5e7eb' }, min: visibleMin, max: visibleMax },
+          y: { position:'right', ticks:{ color:'#94a3b8' }, grid:{ color:'#e5e7eb' } }
         }
       }
     });
@@ -1628,7 +1692,8 @@ async function computeDailyOutlook(symbol){
     const m15Confirm = confirmM15WithD1(m15, d1Crt);
     if(!m15Confirm.ok) return 'DAY: WAITING';
     // return object with entry so UI can show target
-    return { status: `DAY: ${d1Crt.side}`, entry: m15Confirm.entry, side: d1Crt.side };
+    const target = d1Crt.side === 'BUY' ? d1Crt.range.high : d1Crt.range.low;
+    return { status: `DAY: ${d1Crt.side}`, entry: m15Confirm.entry, side: d1Crt.side, target };
   }catch(e){ return 'Error computing outlook'; }
 }
 
@@ -1710,13 +1775,14 @@ function confirmH1WithD1(h1Data, d1Signal){
 
 async function refreshDailyOutlooks(){
   const symbols = ['PAXGUSDT'];
-  const idMap = { PAXGUSDT:'paxgOutlook' };
+  const idMap = { PAXGUSDT:'paxgEntry' };
+  const targetMap = { PAXGUSDT:'paxgTarget' };
   const idBadgeMap = { PAXGUSDT:'paxgBadge' };
   function badgeForSide(side){
     const st = (side||'').toString().toUpperCase();
-    if(st === 'BUY') return `<span class="px-3 py-1 rounded-full text-white bg-green-600">BUY</span>`;
-    if(st === 'SELL') return `<span class="px-3 py-1 rounded-full text-white bg-red-600">SELL</span>`;
-    return '';
+    if(st === 'BUY') return `<div class="d1-pill buy">BUY</div>`;
+    if(st === 'SELL') return `<div class="d1-pill sell">SELL</div>`;
+    return `<div class="d1-pill wait">WAITING</div>`;
   }
 
   function mutedWaiting(text){ return `<div class="muted" style="font-weight:600">${text||'Waiting'}</div>`; }
@@ -1734,15 +1800,20 @@ async function refreshDailyOutlooks(){
         status = res.status;
       }
       // if res provides entry/TP info, show target amount in KPI value
-      if(res && res.entry){ targetText = `Entry ${Number(res.entry).toFixed(2)}`; }
+      if(res && res.entry){ targetText = `Entry: ${Number(res.entry).toFixed(2)}`; }
       const el = document.getElementById(idMap[sym]);
+      const targetEl = document.getElementById(targetMap[sym]);
       const badgeEl = document.getElementById(idBadgeMap[sym]);
       if(el){
         if(status === 'WAITING'){
-          el.innerHTML = targetText ? `<div style="font-weight:700">${targetText}</div>` : mutedWaiting('Waiting');
+          el.innerHTML = targetText ? `${targetText}` : 'Entry: —';
         } else {
-          el.innerHTML = targetText ? `<div style="font-weight:700">${targetText}</div>` : '';
+          el.innerHTML = targetText ? `${targetText}` : 'Entry: —';
         }
+      }
+      if(targetEl){
+        if(res && res.target){ targetEl.innerHTML = `D1 target: ${Number(res.target).toFixed(2)}`; }
+        else targetEl.innerHTML = 'D1 target: —';
       }
       if(badgeEl) badgeEl.innerHTML = badgeForSide(status);
     }catch(e){ console.warn('daily outlook error', e); }
