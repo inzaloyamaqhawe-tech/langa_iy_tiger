@@ -3,14 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Langa CRT Trade — GOLD</title>
+<title>Langa CRT Trade — PAXGUSD</title>
 
 <!-- Tailwind for quick styling -->
 <script src="https://cdn.tailwindcss.com"></script>
-<!-- Modern UI font -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 
 <!-- Chart.js and financial plugin -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
@@ -20,7 +16,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
 
 <style>
-  :root{ --bg:#f3f6fb; --card:#ffffff; --muted:#475569; --accent:#2563eb; }
+  :root{ --bg:#f4f8ff; --card:#ffffff; --muted:#6b7280; --accent:#2563eb; }
   /* Light dashboard styles for laptop view */
   .light-dashboard{ background:#f8fafc; color:#071127; border-radius:12px; padding:18px; }
   .light-card{ background:#ffffff; color:#071127; border:1px solid #e6eef8; padding:14px; border-radius:10px; }
@@ -29,53 +25,22 @@
   .kpi-label{ color:#6b7280; font-size:0.9rem; }
   .badge-buy{ background:#dcfce7; color:#065f46; padding:6px 10px; border-radius:999px; font-weight:700 }
   .badge-sell{ background:#fee2e2; color:#991b1b; padding:6px 10px; border-radius:999px; font-weight:700 }
-  /* Keep sidebar fixed while main content scrolls */
-  #sidebar{ position:sticky; top:18px; height:calc(100vh - 36px); overflow:auto; align-self:flex-start; z-index:20 }
   /* dashboard chart card sizing */
   #dashboardSuccessChart{ width:100% !important; height:180px !important }
   html,body{height:100%}
-  body{background:var(--bg); color:#0f1724; font-family:Inter,system-ui,Arial; margin:0; padding:18px;}
-  .card{background:var(--card); border:1px solid #e6eef8; padding:14px; border-radius:12px;}
+  body{background:var(--bg); color:#111827; font-family:Inter,system-ui,Arial; margin:0; padding:18px;}
+  .card{background:var(--card); border:1px solid #e5e7eb; padding:14px; border-radius:12px;}
   .btn{padding:8px 12px; border-radius:8px; font-weight:600; cursor:pointer}
   .btn-navy{background:var(--accent); color:white}
-  .btn-black{background:#0f1724;border:1px solid #e6eef8;color:#ffffff}
-  .select, .input { background:#f8fafc; color:#0f1724; padding:8px 10px; border-radius:8px; border:1px solid #e6eef8; width:100%}
-  .small{font-size:.85rem; color:#9fb0cc}
-  .tag{background:#ffffff;color:#071127;padding:8px;border-radius:8px;border:1px solid #e6eef8}
-  .tag .small, .tag .muted { color: #071127; }
+  .btn-black{background:#ffffff;border:1px solid #cbd5f5;color:#111827}
+  .select, .input { background:#ffffff; color:#111827; padding:8px 10px; border-radius:8px; border:1px solid #dbe5f7; width:100%}
+  .small{font-size:.85rem; color:#6b7280}
+  .tag{background:#ffffff;padding:8px;border-radius:8px;border:1px solid #e5e7eb}
   #chartArea{ width:14cm; height:7.6cm; margin:0 auto; }
   canvas{ max-width:100%; height:100% !important; width:100% !important; }
   .list-scroll{max-height:20rem; overflow:auto}
   .list-item{padding:10px 0; min-height:40px; display:flex;align-items:center}
-  .muted { color:#9fb0cc; font-size:0.9rem }
-/* Additional polished styles */
-  .app-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.3)); box-shadow:0 6px 18px rgba(9,30,66,0.06); }
-  .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem }
-  .logo img{ height:36px; width:36px; border-radius:8px; box-shadow:0 6px 14px rgba(2,6,23,0.08); }
-  .controls{ display:flex; gap:8px; align-items:center }
-  .card{ box-shadow: 0 8px 24px rgba(15,23,36,0.06); }
-  .light-card{ box-shadow: 0 6px 20px rgba(15,23,36,0.04); }
-  .btn{ transition:all .18s ease; }
-  .btn:hover{ transform:translateY(-2px); box-shadow:0 10px 24px rgba(2,6,23,0.06); }
-  .btn-navy{ background:linear-gradient(180deg,var(--accent),#1e40af); border:none }
-  .btn-black{ background:linear-gradient(180deg,#0f1724,#0b1220); color:#fff; border:none }
-  .select, .input { box-shadow: inset 0 1px 0 rgba(255,255,255,0.02), 0 2px 6px rgba(2,6,23,0.03); }
-
-  /* Chart container with subtle 3D illusion (canvas remains flat but framed) */
-  .canvas-wrap{ position:relative; padding:12px; border-radius:14px; background:linear-gradient(180deg,#fbfdff,#eef6ff); box-shadow: 0 20px 50px rgba(2,6,23,0.06), inset 0 1px 0 rgba(255,255,255,0.6); }
-  .canvas-wrap:before{ content:''; position:absolute; left:12px; right:12px; top:8px; bottom:8px; border-radius:12px; pointer-events:none; box-shadow: 0 18px 40px rgba(2,6,23,0.06); transform:translateY(6px); opacity:0.6 }
-  #chartArea{ background:linear-gradient(180deg,#ffffff,#f7fbff); border-radius:12px; padding:8px; }
-  canvas.chart-canvas{ border-radius:10px; box-shadow: 0 22px 48px rgba(2,6,23,0.08); }
-
-  /* Candles: keep color codes, use stroke-like effect via overlay for perceived depth */
-  .candle-3d-overlay{ position:absolute; inset:0; pointer-events:none; mix-blend-mode:overlay; border-radius:10px }
-
-  /* Refined lists */
-  .list-item{ padding:12px 0; border-bottom:1px solid rgba(15,23,36,0.03); display:flex; justify-content:space-between; align-items:center }
-  .list-item .small{ color:#64748b }
-
-  /* Responsive tweaks */
-  @media(min-width:1024px){ .kpi-grid{ grid-template-columns:repeat(4,1fr) } }
+  .muted { color:#6b7280; font-size:0.9rem }
 </style>
 </head>
 <body>
@@ -84,8 +49,6 @@
     <div class="flex gap-4">
       <aside class="w-56 card" id="sidebar">
         <h2 class="font-bold">Menu</h2>
-        <div class="mt-2 small" id="syncStatus">Last sync: —</div>
-        <div class="mt-2"><button id="syncNow" class="btn btn-black" style="font-size:0.85rem;padding:6px 10px">Sync Now</button></div>
         <div class="mt-4 flex flex-col gap-2">
           <button id="menuDashboard" class="btn btn-black">Dashboard</button>
           <button id="menuCRT" class="btn btn-black">CRT Trade</button>
@@ -114,7 +77,7 @@
 
             <div class="mt-4 light-card">
               <h3 class="font-semibold">Weekly Success Rate (Last 7 days)</h3>
-              <div class="mt-2"><canvas id="dashboardSuccessChart" class="chart-canvas" height="180"></canvas></div>
+              <div class="mt-2"><canvas id="dashboardSuccessChart" height="180"></canvas></div>
             </div>
           </div>
         </div>
@@ -182,7 +145,7 @@
                 <div id="candleCloseInfo_view" class="small">Candle closes at: —</div>
               </div>
             </div>
-            <div id="chartArea_view" class="mt-3 canvas-wrap"><canvas id="mainChart" class="chart-canvas"></canvas></div>
+            <div id="chartArea_view" class="mt-3"><canvas id="mainChart_view"></canvas></div>
             <div class="mt-2 small muted">CRT-only entries. Alerts only when valid CRT is detected.</div>
           </div>
 
@@ -382,9 +345,7 @@ function drawMainChart(updateOnly=false){
   const canvasEl = getEl('mainChart');
   if(!canvasEl) return;
   const ctx = canvasEl.getContext('2d');
-  const full = RUNTIME.history || [];
-  const VISIBLE_CANDLES = 150; // show this many candles on chart (reduced per request)
-  const d = full.slice(-VISIBLE_CANDLES);
+  const d = RUNTIME.history;
   if(!d || !d.length) return;
   const labels = d.map(x=>x.t);
   const candlesticks = d.map(x=>({x:x.t, o:x.o, h:x.h, l:x.l, c:x.c}));
@@ -406,191 +367,60 @@ function drawMainChart(updateOnly=false){
     { id:'price', label:'Price', data: candlesticks }
   ];
 
-  // Plugin to draw setup overlay (entry zone, SL, TP range)
-  const setupOverlayPlugin = {
-    id: 'setupOverlay',
-    beforeDraw: (chart) => {
-      try{
-        const s = RUNTIME.currentSetupDrawing;
-        if(!s || !chart.scales || !chart.scales.y) return;
-        const ctx = chart.ctx;
-        const yScale = chart.scales.y;
-        const xScale = chart.scales.x;
-        // draw horizontal lines for entry, SL and TP levels
-        const priceToY = (p) => yScale.getPixelForValue(p);
-        const left = chart.chartArea.left;
-        const right = chart.chartArea.right;
-        ctx.save();
-        // rectangle between SL and best TP (background range)
-        const tpMax = s.tpMax;
-        const sl = s.sl;
-        if(tpMax != null && sl != null){
-          const y1 = priceToY(tpMax);
-          const y2 = priceToY(sl);
-          ctx.fillStyle = (s.side === 'BUY') ? 'rgba(16,185,129,0.06)' : 'rgba(239,68,68,0.06)';
-          ctx.fillRect(left, Math.min(y1,y2), right-left, Math.abs(y2-y1));
-        }
-        // entry zone line
-        if(s.entry != null){
-          const ye = priceToY(s.entry);
-          ctx.strokeStyle = '#374151'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
-          ctx.beginPath(); ctx.moveTo(left, ye); ctx.lineTo(right, ye); ctx.stroke();
-          ctx.fillStyle = '#111827'; ctx.font = '12px Arial'; ctx.fillText(`Entry ${s.entry.toFixed(2)}`, left+6, ye-6);
-        }
-        // SL line
-        if(sl != null){
-          const ys = priceToY(sl);
-          ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
-          ctx.beginPath(); ctx.moveTo(left, ys); ctx.lineTo(right, ys); ctx.stroke();
-          ctx.fillStyle = '#ef4444'; ctx.fillText(`SL ${sl.toFixed(2)}`, right-80, ys-6);
-        }
-        // TP lines
-        if(Array.isArray(s.tps)){
-          ctx.setLineDash([]);
-          ctx.strokeStyle = '#10b981'; ctx.lineWidth = 1;
-          s.tps.forEach((tp, idx)=>{ if(tp==null) return; const y = priceToY(tp); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); ctx.fillStyle = '#065f46'; ctx.fillText(`TP${idx+1} ${tp.toFixed(2)}`, left+6, y-6); });
-        }
-
-        // Broker-style position boxes (only when confirmed)
-        // Draw profit area in green and SL area in red regardless of side.
-        if(s.confirmed){
-          try{
-            const entryY = (s.entry!=null) ? priceToY(s.entry) : null;
-            const slY = (s.sl!=null) ? priceToY(s.sl) : null;
-            const tpY = (s.tpMax!=null) ? priceToY(s.tpMax) : null;
-            if(entryY != null){
-              // profit zone (entry <-> tpMax)
-              if(tpY != null){ ctx.fillStyle = 'rgba(16,185,129,0.18)'; ctx.fillRect(left, Math.min(tpY, entryY), right-left, Math.abs(entryY - tpY)); }
-              // SL zone (entry <-> sl)
-              if(slY != null){ ctx.fillStyle = 'rgba(239,68,68,0.12)'; ctx.fillRect(left, Math.min(slY, entryY), right-left, Math.abs(entryY - slY)); }
-            }
-          }catch(e){/* ignore position draw errors */}
-        }
-        ctx.restore();
-      }catch(e){/* ignore overlay errors */}
-    }
-  };
-
-  // Custom plugin to render 3D-styled candlesticks (body with gradient, subtle shadow, thin wicks)
-  const candle3dPlugin = {
-    id: 'candle3dPlugin',
-    afterDatasetDraw(chart){
-      try{
-        const ctx = chart.ctx;
-        const ds = chart.data.datasets && chart.data.datasets[0];
-        if(!ds || (!ds.data) ) return;
-        const xScale = chart.scales.x;
-        const yScale = chart.scales.y;
-        const count = ds.data.length || 1;
-        const baseWidth = Math.max(4, Math.min(18, (chart.width || 600) / Math.max(20, count) * 0.7));
-        for(let i=0;i<ds.data.length;i++){
-          const v = ds.data[i];
-          const t = v.t || v.x || (v.time || i);
-          const x = xScale.getPixelForValue(t);
-          const open = (typeof v.o !== 'undefined')? v.o : v.open;
-          const close = (typeof v.c !== 'undefined')? v.c : v.close;
-          const high = (typeof v.h !== 'undefined')? v.h : v.high;
-          const low = (typeof v.l !== 'undefined')? v.l : v.low;
-          if(open == null || close == null || high == null || low == null) continue;
-          const openY = yScale.getPixelForValue(open);
-          const closeY = yScale.getPixelForValue(close);
-          const highY = yScale.getPixelForValue(high);
-          const lowY = yScale.getPixelForValue(low);
-          const top = Math.min(openY, closeY);
-          const height = Math.max(1, Math.abs(closeY - openY));
-          const w = baseWidth;
-          const left = Math.round(x - w/2);
-          // draw body with shadow and gradient
-          ctx.save();
-          ctx.beginPath();
-          ctx.shadowColor = 'rgba(2,6,23,0.12)';
-          ctx.shadowBlur = 8;
-          const isUp = (close >= open);
-          const grad = ctx.createLinearGradient(left, top, left, top + height + 2);
-          if(isUp){ grad.addColorStop(0, 'rgba(16,185,129,0.98)'); grad.addColorStop(1, 'rgba(16,185,129,0.78)'); }
-          else { grad.addColorStop(0, 'rgba(239,68,68,0.98)'); grad.addColorStop(1, 'rgba(239,68,68,0.78)'); }
-          if(height < 2){
-            // doji or very small body: draw a horizontal pill
-            ctx.fillStyle = grad;
-            ctx.strokeStyle = isUp ? '#065f46' : '#991b1b';
-            ctx.lineWidth = 1;
-            ctx.fillRect(left, top - 1, w, 2);
-            ctx.strokeRect(left, top - 1, w, 2);
-          } else {
-            ctx.fillStyle = grad;
-            ctx.strokeStyle = isUp ? '#065f46' : '#991b1b';
-            ctx.lineWidth = 1;
-            ctx.fillRect(left, top, w, height);
-            ctx.strokeRect(left, top, w, height);
-            // subtle top highlight
-            ctx.fillStyle = 'rgba(255,255,255,0.22)';
-            ctx.fillRect(left + 1, top + 1, w - 2, Math.min(6, Math.max(2, height/4)));
-          }
-          // draw wicks (no shadow)
-          ctx.shadowColor = 'transparent';
-          ctx.beginPath();
-          ctx.strokeStyle = isUp ? '#065f46' : '#991b1b';
-          ctx.lineWidth = 1.2;
-          // upper wick
-          ctx.moveTo(x, highY);
-          ctx.lineTo(x, top);
-          // lower wick
-          ctx.moveTo(x, top + height);
-          ctx.lineTo(x, lowY);
-          ctx.stroke();
-          ctx.restore();
-        }
-      }catch(e){ /* ignore paint errors */ }
-    }
-  };
-
-  try {
+  try{
     RUNTIME.chart = new Chart(ctx, {
       type: (RUNTIME.chartType === 'line') ? 'line' : 'candlestick',
       data: { labels, datasets },
       options: {
-        maintainAspectRatio: false,
-        animation: false,
+        maintainAspectRatio:false,
+        animation:false,
+        plugins: { legend:{ labels:{ color:'#cfe6ff' } } },
         parsing: false,
         plugins: {
-          legend: { labels: { color: '#0f1724' } },
+          legend: { labels: { color:'#cfe6ff' } },
           zoom: {
             pan: { enabled: true, mode: 'x' },
-            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              mode: 'x'
+            }
           }
         },
         scales: {
-          x: { type: 'time', ticks: { color: '#9fb0cc' } },
-          y: { position: 'right', ticks: { color: '#9fb0cc' }, grid: { color: '#122033' } }
+          x: { type:'time', ticks:{ color:'#9fb0cc' } },
+          y: { position:'right', ticks:{ color:'#9fb0cc' }, grid:{ color:'#122033' } }
         }
-      },
-      plugins: [setupOverlayPlugin, candle3dPlugin]
+      }
     });
     attachPanWheel();
-  } catch (e) {
+  }catch(e){
     console.error('Chart render failed, falling back to line chart.', e);
     RUNTIME.chartType = 'line';
-    const fallback = [{ id: 'price', label: 'Price', data: lineData, type: 'line', borderColor: '#3b82f6', pointRadius: 0, borderWidth: 1.4 }];
+    const fallback = [{ id:'price', label:'Price', data: lineData, type:'line', borderColor:'#3b82f6', pointRadius:0, borderWidth:1.4 }];
     RUNTIME.chart = new Chart(ctx, {
       type: 'line',
       data: { labels, datasets: fallback },
       options: {
-        maintainAspectRatio: false,
-        animation: false,
-        parsing: false,
+        maintainAspectRatio:false,
+        animation:false,
         plugins: {
-          legend: { labels: { color: '#0f1724' } },
+          legend: { labels: { color:'#cfe6ff' } },
           zoom: {
             pan: { enabled: true, mode: 'x' },
-            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              mode: 'x'
+            }
           }
         },
+        parsing: false,
         scales: {
-          x: { type: 'time', ticks: { color: '#9fb0cc' } },
-          y: { position: 'right', ticks: { color: '#9fb0cc' }, grid: { color: '#122033' } }
+          x: { type:'time', ticks:{ color:'#9fb0cc' } },
+          y: { position:'right', ticks:{ color:'#9fb0cc' }, grid:{ color:'#122033' } }
         }
-      },
-      plugins: [setupOverlayPlugin, candle3dPlugin]
+      }
     });
     attachPanWheel();
   }
@@ -599,55 +429,18 @@ function drawMainChart(updateOnly=false){
 function attachPanWheel(){
   const canvas = getEl('mainChart');
   if(!canvas || !RUNTIME.chart) return;
-  // clean previous handlers
-  try{
-    if(RUNTIME.panWheelHandler) canvas.removeEventListener('wheel', RUNTIME.panWheelHandler);
-    if(RUNTIME.panPointerDown) canvas.removeEventListener('pointerdown', RUNTIME.panPointerDown);
-    if(RUNTIME.panPointerMove) canvas.removeEventListener('pointermove', RUNTIME.panPointerMove);
-    if(RUNTIME.panPointerUp) canvas.removeEventListener('pointerup', RUNTIME.panPointerUp);
-  }catch(e){}
-
-  // ensure canvas allows horizontal pointer interactions while still permitting page vertical scroll
-  canvas.style.touchAction = 'pan-y';
-
-  // Wheel -> pan horizontally when user scrolls horizontally or holds shift
+  if(RUNTIME.panWheelHandler){
+    canvas.removeEventListener('wheel', RUNTIME.panWheelHandler);
+  }
   RUNTIME.panWheelHandler = (e) => {
     if(!RUNTIME.chart || !RUNTIME.chart.pan) return;
     const horizontal = Math.abs(e.deltaX) > 0 ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
     if(horizontal !== 0){
       e.preventDefault();
-      // invert wheel direction for natural panning
-      RUNTIME.chart.pan({ x: -horizontal, y: 0 }, undefined, 'default');
+      RUNTIME.chart.pan({x: -horizontal, y: 0}, undefined, 'default');
     }
   };
   canvas.addEventListener('wheel', RUNTIME.panWheelHandler, { passive:false });
-
-  // Pointer drag panning (click-and-drag to scroll left/right like broker charts)
-  let dragging = false;
-  let lastX = 0;
-  RUNTIME.panPointerDown = (e) => {
-    if(e.button !== undefined && e.button !== 0) return; // only left button
-    dragging = true;
-    lastX = e.clientX;
-    canvas.style.cursor = 'grabbing';
-    if(e.pointerId && canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
-  };
-  RUNTIME.panPointerMove = (e) => {
-    if(!dragging || !RUNTIME.chart || !RUNTIME.chart.pan) return;
-    const dx = e.clientX - lastX;
-    lastX = e.clientX;
-    // pan the chart by pixel delta (positive dx moves chart to left visually)
-    RUNTIME.chart.pan({ x: dx, y: 0 }, undefined, 'default');
-  };
-  RUNTIME.panPointerUp = (e) => {
-    if(!dragging) return;
-    dragging = false;
-    canvas.style.cursor = 'default';
-    if(e.pointerId && canvas.releasePointerCapture) canvas.releasePointerCapture(e.pointerId);
-  };
-  canvas.addEventListener('pointerdown', RUNTIME.panPointerDown);
-  canvas.addEventListener('pointermove', RUNTIME.panPointerMove);
-  canvas.addEventListener('pointerup', RUNTIME.panPointerUp);
 }
 
 /* Websocket streaming */
@@ -791,51 +584,63 @@ function analyzeCRTWithData(data){
   if(closed.length < 3){
     return {status:'WAITING', side:'—', reason:'Not enough closed candles', details:[]};
   }
-
   const c1 = closed[closed.length-2];
   const c2 = closed[closed.length-1];
-  // Rule: ignore setup if any HTF candle between C1 and C2 is a doji (indecisive)
-  try{
-    const allIdx = (data || []).map((x,i)=>({t:x.t, i}));
-    const idx1 = data.findIndex(x=>x.t === c1.t);
-    const idx2 = data.findIndex(x=>x.t === c2.t);
-    if(idx1 >=0 && idx2 >=0 && Math.abs(idx2 - idx1) > 1){
-      const start = Math.min(idx1, idx2)+1;
-      const end = Math.max(idx1, idx2)-1;
-      for(let k=start;k<=end;k++){
-        const mid = data[k];
-        if(mid){
-          const bodyPct = candleBodyPct(mid);
-          if(bodyPct < 0.15){
-            return {status:'INVALID CRT', side:'—', reason:'Indecisive/doji candle present between C1 and C2 (HTF).', details};
-          }
-        }
-      }
-    }
-  }catch(e){ console.warn('doji check failed', e); }
+  // age check: ignore HTF reference older than configured hours
+  const HTF_MAX_AGE_HOURS = 24;
+  if(Date.now() - c1.t > HTF_MAX_AGE_HOURS * 3600 * 1000){
+    return {status:'INVALID CRT', side:'—', reason:'H1 reference candle too old', details:[]};
+  }
+
+  // Relaxed CRT scoring: evaluate multiple checks and require a minimum
+  // proportion (60%) to be true. However, C2 MUST close back inside C1's
+  // range for any valid CRT (this is mandatory per user request).
   const crh = c1.h;
   const crl = c1.l;
   const mid = (crh + crl) / 2;
 
   const details = [];
-  details.push(`H1 C1 (Reference) @ ${new Date(c1.t).toLocaleString()} — CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
-  details.push(`H1 C2 (Manipulation) @ ${new Date(c2.t).toLocaleString()} — O:${c2.o.toFixed(2)} H:${c2.h.toFixed(2)} L:${c2.l.toFixed(2)} C:${c2.c.toFixed(2)}`);
+  details.push(`H1 C1 (Reference, 2nd last CLOSED) @ ${new Date(c1.t).toLocaleString()} — CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
+  details.push(`H1 C2 (Manipulation, last CLOSED) @ ${new Date(c2.t).toLocaleString()} — O:${c2.o.toFixed(2)} H:${c2.h.toFixed(2)} L:${c2.l.toFixed(2)} C:${c2.c.toFixed(2)}`);
 
-  const sweepHigh = c2.h > crh;
-  const sweepLow = c2.l < crl;
+  const sweepInfo = isSweepWithTolerance(c2, crh, crl, 0.02);
+  let sweepHigh = sweepInfo.sweepHigh;
+  let sweepLow = sweepInfo.sweepLow;
   const closeInside = c2.c < crh && c2.c > crl;
   const closeOutside = c2.c > crh || c2.c < crl;
+  details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
 
-  if(closeOutside){
-    return {status:'INVALID CRT', side:'—', reason:'C2 closed outside C1 range (breakout, not manipulation).', details, range:{high:crh, low:crl, mid}};
+  // handle ambiguous dual-sweep by preferring dominant sweep if clear
+  if(sweepHigh && sweepLow){
+    const dominant = (sweepInfo.highEx > sweepInfo.lowEx) ? 'HIGH' : 'LOW';
+    if(Math.abs(sweepInfo.highEx - sweepInfo.lowEx) < 0.015){
+      // ambiguous — count this as a negative for sweep quality but continue
+      sweepHigh = false; sweepLow = false;
+    } else if(dominant === 'HIGH') { sweepHigh = true; sweepLow = false; }
+    else { sweepLow = true; sweepHigh = false; }
   }
 
-  if(!(sweepHigh || sweepLow)){
-    return {status:'WAITING', side:'—', reason:'No liquidity sweep beyond CRH/CRL on C2.', details, range:{high:crh, low:crl, mid}};
-  }
+  // compute checks (closeInside is mandatory)
+  const checks = [];
+  const impulseOk = isCleanImpulse(c1);
+  const compressionOk = precededByCompression(closed);
+  const sweepOk = (sweepHigh || sweepLow);
+  const crosses = countMidpointCrosses(closed, mid, 12);
+  const midpointOk = crosses < 4;
+  checks.push(impulseOk, compressionOk, sweepOk, midpointOk, closeInside);
 
+  const passed = checks.filter(Boolean).length;
+  const total = checks.length;
+  const pct = passed / total;
+
+  details.push(`CRT score: ${passed}/${total} (${Math.round(pct*100)}%) — C2 must close inside; currently ${closeInside ? 'OK' : 'NOT OK'}`);
+
+  // require C2 to close inside as mandatory, and at least 60% of checks true
   if(!closeInside){
     return {status:'INVALID CRT', side:'—', reason:'C2 did not close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
+  }
+  if(pct < 0.6){
+    return {status:'WAITING', side:'—', reason:`CRT checks insufficient (${passed}/${total}).`, details, range:{high:crh, low:crl, mid}};
   }
 
   const side = sweepHigh ? 'SELL' : 'BUY';
@@ -854,17 +659,6 @@ function analyzeCRTWithData(data){
     ref: c1,
     manip: c2
   };
-}
-
-// Require a minimum number of checklist items to be true before allowing
-// system notifications. Returns true when at least `min` items are passed.
-function meetsChecklistThreshold(h1Crt, min=2){
-  if(!h1Crt || !h1Crt.checklist) return false;
-  const c = h1Crt.checklist;
-  const keys = ['clearCR','liquiditySweep','displacement','mss','fvg'];
-  let passed = 0;
-  for(const k of keys) if(!!c[k]) passed++;
-  return passed >= min;
 }
 
 function detectMSS(data, side, lookback=10){
@@ -957,8 +751,6 @@ function confirmM5WithH1(m5Data, h1Signal){
   };
 }
 
-// advanced validation removed per user request: use only original CRT checks
-
 function rrTargets(entry, sl){
   const risk = Math.abs(entry - sl);
   const tp = entry > sl ? (entry + (risk*2)) : (entry - (risk*2));
@@ -995,17 +787,17 @@ function updateCRTUI(h1Crt, m5Confirm){
     let tp3 = null, tp4 = null, tp5 = null, tp6 = null;
     if(symbol === 'PAXGUSDT'){
       if(h1Crt.side === 'BUY'){
-        tp1 = +(entry + 4).toFixed(2);
+        tp1 = +(entry + 5).toFixed(2);
         tp2 = +(entry + 10).toFixed(2);
         tp3 = +(entry + 15).toFixed(2);
         tp4 = +(entry + 20).toFixed(2);
-        tp5 = +(entry + 30).toFixed(2);
+        tp5 = +(entry + 25).toFixed(2);
       } else {
-        tp1 = +(entry - 4).toFixed(2);
+        tp1 = +(entry - 5).toFixed(2);
         tp2 = +(entry - 10).toFixed(2);
         tp3 = +(entry - 15).toFixed(2);
         tp4 = +(entry - 20).toFixed(2);
-        tp5 = +(entry - 30).toFixed(2);
+        tp5 = +(entry - 25).toFixed(2);
       }
       const tp6Raw = getLiquidityTarget(RUNTIME.historyH1, h1Crt.side, 50);
       tp6 = (tp6Raw && (h1Crt.side === 'BUY' ? tp6Raw > tp5 : tp6Raw < tp5)) ? tp6Raw : null;
@@ -1020,38 +812,25 @@ function updateCRTUI(h1Crt, m5Confirm){
     // If we already have server-authoritative HTML for this symbol, prefer it
     // and avoid overwriting it with computed values to prevent blinking.
     if(!(RUNTIME.lastServerDetailsHtml && RUNTIME.lastServerDetailsSymbol === RUNTIME.symbol)){
-      // Build checklist HTML from analyzeCRTWithData
-      const checklist = (h1Crt && h1Crt.checklist) ? h1Crt.checklist : null;
-        const zoneType = (m5Confirm && m5Confirm.zone && m5Confirm.zone.source) ? m5Confirm.zone.source : (checklist && checklist.fvg ? 'FVG' : (checklist && checklist.mss ? 'CoCH' : 'OB'));
-        const checklistHtml = checklist ? (`<div style="margin-top:8px"><strong>CRT Validation Checklist</strong><div class="small muted">${checklist.premiumDiscountHint||''} • ${zoneType||''}</div><ul style="padding-left:16px;margin-top:6px"><li>${checklist.clearCR? '✔' : '✖'} Clear CR candle</li><li>${checklist.liquiditySweep? '✔' : '✖'} Liquidity near range</li><li>${checklist.displacement? '✔' : '✖'} Displacement / strong reaction</li><li>${checklist.mss? '✔' : '✖'} Market structure shift / CoCH (MSS)</li><li>${checklist.fvg? '✔' : '✖'} FVG / Imbalance (optional)</li></ul></div>`) : '';
-
       setHTML(crtDetailsEl,
       `HTF Range: ${h1Crt.range.low.toFixed(2)} → ${h1Crt.range.high.toFixed(2)}<br/>`+
       `Entry (Zone Mid): ${entry.toFixed(2)}<br/>`+
       `SL: ${sl ? sl.toFixed(2) : 'Waiting'}<br/>`+
       `TP1 (>=20 pips): ${tp1.toFixed(2)} • TP2 (>=40 pips): ${tp2.toFixed(2)}<br/>`+
       `TP3: ${tp3 ? tp3.toFixed(2) : 'Waiting'} • TP4: ${tp4 ? tp4.toFixed(2) : '—'} • TP5: ${tp5 ? tp5.toFixed(2) : '—'} • TP6 (Liquidity/OB): ${tp6 ? tp6.toFixed(2) : 'Waiting'}<br/>`+
-      `M5 Entry Zone: ${zone}` + checklistHtml
+      `M5 Entry Zone: ${zone}`
       );
     }
     if(m5Confirm.ok && m5Confirm.sweep){
       const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=>x.toFixed(2)).join(' / ');
       const tp6Text = tp6 ? tp6.toFixed(2) : '—';
-      // Only send system notifications when CRT checklist meets threshold (>= 2 of 5 for intermediate)
-      if(meetsChecklistThreshold(h1Crt, 2)){
-        notifyUser(symbol,
-          `CRT ${h1Crt.side} on ${symbolLabel()}`,
-          `Entry: ${entry.toFixed(2)} | SL: ${sl ? sl.toFixed(2) : 'Waiting'} | TPs: ${tpListText} | TP6: ${tp6Text}`
-        );
-      }
+      notifyUser(symbol,
+        `CRT ${h1Crt.side} on ${symbolLabel()}`,
+        `Entry: ${entry.toFixed(2)} | SL: ${sl ? sl.toFixed(2) : 'Waiting'} | TPs: ${tpListText} | TP6: ${tp6Text}`
+      );
     }
-
-    // set up overlay drawing info only when M5 confirmation exists
-    const confirmed = !!(m5Confirm && m5Confirm.ok && m5Confirm.sweep);
-    RUNTIME.currentSetupDrawing = confirmed ? { side: h1Crt.side, entry: entry, sl: sl, tps: [tp1,tp2,tp3,tp4,tp5].filter(x=>x!=null), tpMax: (tp5||tp4||tp3||tp2||tp1), confirmed: true } : null;
   } else {
     setHTML(crtDetailsEl, h1Crt.details && h1Crt.details.length ? h1Crt.details.join('<br/>') : '—');
-    RUNTIME.currentSetupDrawing = null;
   }
 
   // Debounced server-authoritative details: avoid rapid flipping between
@@ -1136,41 +915,6 @@ async function updateLiveAndCRT(force=false){
     ? confirmM5WithH1(RUNTIME.historyM5, h1Crt)
     : {ok:false, reason:'Waiting for H1 setup.'};
   updateCRTUI(h1Crt, m5Confirm);
-  // If M5 confirms the H1 setup, ensure we record and attempt to post immediately.
-  try{
-    if(m5Confirm && m5Confirm.ok && h1Crt && h1Crt.status === 'VALID CRT SETUP'){
-      const h1_ts = (h1Crt && h1Crt.ref && h1Crt.ref.t) ? h1Crt.ref.t : (RUNTIME.historyH1 && RUNTIME.historyH1.length>1 ? RUNTIME.historyH1[RUNTIME.historyH1.length-2].t : Date.now());
-      const cid = `${RUNTIME.symbol}|${h1_ts}`;
-      const existing = loadSetups().find(s=>getCanonicalId(s) === cid || s.id === cid);
-      if(!existing){
-        const entry = m5Confirm.entry || h1Crt.range.mid;
-        const setupObj = { symbol: RUNTIME.symbol, side: h1Crt.side, entry, sl: getFixedSL(RUNTIME.symbol, entry, h1Crt.side), tp1: h1Crt.range.mid, tp2: h1Crt.side === 'BUY' ? h1Crt.range.high : h1Crt.range.low, h1_ts, ref: h1Crt.ref };
-        if(m5Confirm && m5Confirm.zone){ setupObj.zone = m5Confirm.zone; }
-        // Persist locally and then attempt a single immediate push for confirmed setups.
-        const stored = addSetupOnce(setupObj);
-        console.info('Recorded setup on M5 confirmation', cid);
-        try{
-          const res = await pushSetupToServer(stored);
-          if(res && res.dbOk){
-            try{ const body = await safeParseJson(res.dbResp); markSetupServerSynced(stored, body||null); }catch(e){}
-          } else {
-            console.warn('Confirmed setup push failed (no enqueue):', cid, res);
-          }
-        }catch(e){ console.warn('push error for confirmed setup', e); }
-      } else {
-        // existing local setup found — if not serverSynced try to push again
-        if(existing && !existing.serverSynced){
-          try{
-            const res = await pushSetupToServer(existing);
-            console.info('Retried push for existing setup', cid, res);
-            if(res && res.dbOk && typeof markSetupServerSynced === 'function'){
-              try{ const body = res.dbResp && res.dbResp.clone && await safeParseJson(res.dbResp); markSetupServerSynced(existing, body||null); }catch(e){}
-            }
-          }catch(e){ console.warn('Retry push error', e); }
-        }
-      }
-    }
-  }catch(e){ console.warn('auto-record on confirm failed', e); }
 }
 
 function cacheSignal(symbol, payload){
@@ -1262,11 +1006,9 @@ function normalizeSetupsArray(arr){
 
 function saveSetups(list){
   const normalized = normalizeSetupsArray(list || []);
-  // store newest-first (by recordedTs or entryTs)
-  normalized.sort((a,b)=> (b.recordedTs||b.entryTs||0) - (a.recordedTs||a.entryTs||0));
   localStorage.setItem(SETUP_STORAGE_KEY, JSON.stringify(normalized));
 }
-function loadSetups(){ try{ const raw = JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || '[]'); const normalized = normalizeSetupsArray(Array.isArray(raw)?raw:[]); normalized.sort((a,b)=> (b.recordedTs||b.entryTs||0) - (a.recordedTs||a.entryTs||0)); return normalized; }catch(e){ return []; } }
+function loadSetups(){ try{ const raw = JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || '[]'); return normalizeSetupsArray(Array.isArray(raw)?raw:[]); }catch(e){ return []; } }
 
 function getCanonicalId(s){
   if(!s) return null;
@@ -1276,193 +1018,34 @@ function getCanonicalId(s){
   return null;
 }
 function addSetupOnce(setup){
-  // Create canonical id and attempt to push to server immediately.
+  const list = loadSetups();
   const id = getCanonicalId(setup) || `${setup.symbol}|${setup.h1_ts||setup.ts||Date.now()}`;
+  if(list.find(s=>getCanonicalId(s) === id)) return; // already recorded by canonical id
   const client = getClientId();
   const now = Date.now();
-  const obj = {...setup, id, status: setup.status || 'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: setup.hitHistory || [] };
-  // Attempt to post to server (best-effort). Do NOT enqueue local pending — server must be authoritative.
-  (async ()=>{
-    try{
-      const res = await pushSetupToServer(obj);
-      if(res && res.dbOk){
-        try{ const body = await safeParseJson(res.dbResp); markSetupServerSynced(obj, body||null); }catch(e){}
-        // Optionally cache the server row locally for quick display, but UI will pull from server.
-        try{ const cache = loadSetups(); cache.push({...obj, serverSynced:true}); saveSetups(cache); }catch(e){}
-      } else {
-        console.warn('addSetupOnce: push to server failed for', id, res);
-      }
-    }catch(e){ console.warn('addSetupOnce push error', e); }
-  })();
-  return obj;
-}
-
-// Retry any pending posts stored in localStorage every 60s
-async function retryPendingPosts(){
-  try{
-    const raw = JSON.parse(localStorage.getItem('crt_pending_posts_v1') || '[]');
-    if(!Array.isArray(raw) || !raw.length) return;
-    const remaining = [];
-    for(const item of raw){
-      try{
-        // support legacy simple items (raw setup object) and enriched queued items
-        const setupObj = item.setup || item;
-        const pendingTargets = item.pendingTargets || (item.setup ? item.pendingTargets : { db: true, file: true });
-        // attempt only required targets
-        const res = await pushSetupToServer(setupObj, pendingTargets);
-        const dbOk = res && res.dbOk;
-        const fileOk = res && res.fileOk;
-        // if any target still outstanding, re-enqueue with updated pendingTargets
-        const needDb = pendingTargets.db && !dbOk;
-        const needFile = pendingTargets.file && !fileOk;
-        if(needDb || needFile){
-          remaining.push({ setup: setupObj, pendingTargets: { db: needDb, file: needFile } });
-        } else {
-          console.log('Retried and posted pending setup', setupObj.id);
-          // mark local setup as server-synced when DB successful
-          if(dbOk) markSetupServerSynced(setupObj, (res.dbResp && res.dbResp.clone && res.dbResp.clone().json) ? await safeParseJson(res.dbResp) : null);
-        }
-      }catch(e){ remaining.push(item); }
-    }
-    localStorage.setItem('crt_pending_posts_v1', JSON.stringify(remaining));
-  }catch(e){ console.warn('retryPendingPosts error', e); }
-}
-setInterval(retryPendingPosts, 60*1000);
-// safe JSON parse helper for Response objects
-async function safeParseJson(resp){
-  try{ if(!resp) return null; const txt = await resp.text(); if(!txt) return null; return JSON.parse(txt); }catch(e){ return null; }
+  const obj = {...setup, id, status:'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: [] };
+  list.push(obj);
+  saveSetups(list);
+  // Immediately attempt to post this new setup to the central server (best-effort).
+  // Server will upsert by canonical_id so this is non-destructive; keeping this
+  // ensures multi-device persistence works out-of-the-box.
+  pushSetupToServer(obj).then(r=>{
+    if(!r || !r.ok) console.warn('Initial pushSetupToServer failed', r && r.status);
+    else console.log('Initial pushSetupToServer succeeded', obj.id);
+  }).catch(e=>{ console.warn('pushSetupToServer error', e); });
+  // Also run the guarded auto-post/merge routine (keeps local copy in sync if server already has row)
+  tryAutoPost(obj).catch(e=>console.warn('auto-post error', e));
 }
 // Push setup to server (best-effort, non-blocking). Server requires DATABASE_URL configured.
-// apiUpsertSetup remains a convenience wrapper that attempts both endpoints.
-async function apiUpsertSetup(s, targets={db:true,file:true}){
+async function apiUpsertSetup(s){
   try{
-    const promises = [];
-    if(targets.db){ promises.push(fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })); }
-    if(targets.file){ promises.push(fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })); }
-    const settled = await Promise.allSettled(promises);
-    return settled;
-  }catch(e){ console.warn('api upsert failed', e); return null; }
+    await fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
+  }catch(e){ console.warn('api upsert failed', e); }
 }
 
-// Helper to enqueue pending posts with explicit target flags
-function enqueuePending(s, targets={db:true,file:true}){
-  try{
-    const pending = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
-    // dedupe by canonical id to avoid repeated queue entries
-    const cid = getCanonicalId(s) || s.id;
-    if(!cid){ pending.push({ setup: s, pendingTargets: targets }); }
-    else {
-      const existing = pending.find(p => {
-        const ps = p.setup || p;
-        const pid = getCanonicalId(ps) || ps.id;
-        return pid === cid;
-      });
-      if(existing){
-        // update pendingTargets to include any newly requested targets
-        existing.pendingTargets = existing.pendingTargets || {db:true,file:true};
-        existing.pendingTargets.db = existing.pendingTargets.db || !!targets.db;
-        existing.pendingTargets.file = existing.pendingTargets.file || !!targets.file;
-      } else {
-        pending.push({ setup: s, pendingTargets: targets });
-      }
-    }
-    localStorage.setItem('crt_pending_posts_v1', JSON.stringify(pending));
-  }catch(e){ console.warn('enqueuePending failed', e); }
-}
-
-// Resilient push: try DB and File endpoints, prefer success on at least one, and return result object
-async function pushSetupToServer(s, targets={db:true,file:true}){
-  const result = { dbOk: false, fileOk: false, dbResp: null, fileResp: null };
-  try{
-    // Attempt DB first if desired
-    if(targets.db){
-      try{
-        const r = await fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
-        result.dbResp = r;
-        if(r && r.ok) result.dbOk = true;
-      }catch(e){ console.warn('DB post error', e); }
-    }
-
-    // Attempt file endpoint
-    if(targets.file){
-      try{
-        const r2 = await fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
-        result.fileResp = r2;
-        if(r2 && r2.ok) result.fileOk = true;
-      }catch(e){ console.warn('File endpoint post error', e); }
-    }
-
-    // If DB failed but file succeeded, retry DB once
-    if(!result.dbOk && result.fileOk && targets.db){
-      try{
-        const r = await fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
-        result.dbResp = r;
-        if(r && r.ok) result.dbOk = true;
-      }catch(e){ console.warn('DB retry after file success failed', e); }
-    }
-
-    // If file failed but DB succeeded, retry file once
-    if(!result.fileOk && result.dbOk && targets.file){
-      try{
-        const r2 = await fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
-        result.fileResp = r2;
-        if(r2 && r2.ok) result.fileOk = true;
-      }catch(e){ console.warn('File retry after DB success failed', e); }
-    }
-
-    // If DB is OK, mark local setup as server-synced so it's visible and authoritative
-    if(result.dbOk){
-      try{
-        // try to extract server returned row (may include canonical_id/created_at)
-        let body = null;
-        try{ body = await (result.dbResp && result.dbResp.clone && result.dbResp.clone().json ? result.dbResp.clone().json() : null); }catch(e){}
-        markSetupServerSynced(s, body || null);
-      }catch(e){ /* ignore marking errors */ }
-    }
-
-    // Log push attempt for debugging: store last attempts in localStorage
-    try{
-      const logKey = 'crt_push_log_v1';
-      const entry = { id: s.id || null, ts: Date.now(), targets: targets, dbOk: !!result.dbOk, fileOk: !!result.fileOk, dbStatus: result.dbResp ? (result.dbResp.status||null) : null, fileStatus: result.fileResp ? (result.fileResp.status||null) : null };
-      try{ if(result.dbResp && result.dbResp.clone){ const t = await result.dbResp.clone().text(); entry.dbText = t && t.length>1000 ? t.slice(0,1000) : t; } }catch(e){}
-      try{ if(result.fileResp && result.fileResp.clone){ const t2 = await result.fileResp.clone().text(); entry.fileText = t2 && t2.length>1000 ? t2.slice(0,1000) : t2; } }catch(e){}
-      const raw = JSON.parse(localStorage.getItem(logKey) || '[]'); raw.unshift(entry); while(raw.length>40) raw.pop(); localStorage.setItem(logKey, JSON.stringify(raw));
-    }catch(e){ /* ignore logging errors */ }
-
-    return result;
-  }catch(e){ console.warn('pushSetupToServer unexpected error', e); return result; }
-}
-
-// Mark local stored setup as synced with server (merge server metadata if available)
-function markSetupServerSynced(s, serverRow){
-  try{
-    if(!s || !s.id) return;
-    const list = loadSetups();
-    const idx = list.findIndex(x=>getCanonicalId(x) === getCanonicalId(s) || x.id === s.id);
-    if(idx === -1) return;
-    const local = list[idx];
-    // merge useful server fields when provided
-    if(serverRow){
-      if(serverRow.canonical_id) local.id = serverRow.canonical_id;
-      if(serverRow.created_at) local.recordedTs = new Date(serverRow.created_at).getTime();
-      if(serverRow.status) local.status = serverRow.status;
-      if(serverRow.setup && typeof serverRow.setup === 'object'){
-        local.entry = local.entry || serverRow.setup.entry;
-        local.sl = local.sl || serverRow.setup.sl;
-        local.tp1 = local.tp1 || serverRow.setup.tp1;
-        local.tp2 = local.tp2 || serverRow.setup.tp2;
-        local.tp3 = local.tp3 || serverRow.setup.tp3;
-        local.tp4 = local.tp4 || serverRow.setup.tp4;
-        local.tp5 = local.tp5 || serverRow.setup.tp5;
-        local.tp6 = local.tp6 || serverRow.setup.tp6;
-        local.hitHistory = local.hitHistory || serverRow.setup.hitHistory || serverRow.setup.hit_history || [];
-      }
-    }
-    local.serverSynced = true;
-    list[idx] = local;
-    saveSetups(list);
-    refreshSetupViews();
-  }catch(e){ console.warn('markSetupServerSynced error', e); }
+// Manual helper: push a single setup object to the server (returns the fetch Promise)
+function pushSetupToServer(s){
+  return fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) });
 }
 
 // Patch an existing setup on the server with new status/hitHistory (best-effort)
@@ -1471,14 +1054,9 @@ async function patchSetupToServer(s){
   try{
     const url = `/api/setups/${encodeURIComponent(s.id)}`;
     const body = { status: s.status, hitHistory: s.hitHistory, setup: s, entry_ts: s.entryTs || s.recordedTs };
-    // send PATCH to DB-backed API and POST to file-backed endpoint (best-effort)
-    const results = await Promise.allSettled([
-      fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }),
-      fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: s.id, symbol: s.symbol, setup: s, status: s.status, origin: s.origin, entry_ts: s.entryTs || s.recordedTs }) })
-    ]);
-    const dbRes = results[0] && results[0].status === 'fulfilled' ? results[0].value : null;
-    if(dbRes && !dbRes.ok) console.warn('patchSetupToServer failed', dbRes.status);
-    return dbRes;
+    const r = await fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if(!r.ok) console.warn('patchSetupToServer failed', r.status);
+    return r;
   }catch(e){ console.warn('patchSetupToServer error', e); }
 }
 
@@ -1488,12 +1066,14 @@ async function patchSetupToServer(s){
 async function tryAutoPost(s){
   if(!s || !s.id) return;
   try{
-    const serverList = await fetchServerSetups();
-    if(!serverList || !Array.isArray(serverList)) { console.warn('Server not available for auto-post'); return; }
-    const exists = serverList.some(x => x.canonical_id === s.id || x.id === s.id);
+    const r = await fetch('/api/setups');
+    if(!r.ok) { console.warn('Server not available for auto-post', r.status); return; }
+    const j = await r.json();
+    if(!j || !Array.isArray(j.setups)) return;
+    const exists = j.setups.some(x => x.canonical_id === s.id);
     if(exists){
       // server already has it — check if server's TP/SL values differ from our computed setup.
-      const serverRow = serverList.find(x=> (x.canonical_id && x.canonical_id === s.id) || x.id === s.id || (x.setup && x.setup.id === s.id));
+      const serverRow = j.setups.find(x=>x.canonical_id === s.id);
       if(serverRow && serverRow.setup){
         const srv = serverRow.setup;
         // compare numeric fields tp1..tp6, sl, entry
@@ -1520,63 +1100,42 @@ async function tryAutoPost(s){
       }
       return;
     }
-    // not present — push as a new setup to both targets
+    // not present — push as a new setup
     await pushSetupToServer(s);
-    console.log('Auto-pushed setup to server/file', s.id);
+    console.log('Auto-pushed setup to server', s.id);
   }catch(e){ console.warn('tryAutoPost failed', e); }
 }
 
 // Pull setups from server and merge into local storage (non-destructive). Keeps import/export modal.
 async function syncFromServer(){
   try{
-    const server = await fetchServerSetups();
-    if(!server || !Array.isArray(server)) throw new Error('server not available');
-    // Merge server rows with local storage instead of blindly overwriting.
-    const local = loadSetups();
-    const map = {};
-    // seed map with local entries (preserve locally-created pending setups)
-    for(const l of local){ const id = getCanonicalId(l) || l.id; if(!id) continue; map[id] = {...l, id}; }
-    // integrate server rows (server authoritative for fields but do not remove local-only pending)
-    for(const row of server){
-      const s = row.setup || row || {};
-      const id = row.canonical_id || s.id;
-      if(!id) continue;
-      const normalized = {
-        id,
-        symbol: s.symbol || row.symbol || (map[id] && map[id].symbol),
-        status: row.status || s.status || (map[id] && map[id].status) || 'PENDING',
-        origin: s.origin || row.origin || (map[id] && map[id].origin),
-        entryTs: s.entryTs || row.entry_ts || (map[id] && map[id].entryTs),
-        hitHistory: s.hitHistory || s.hit_history || row.hit_history || (map[id] && map[id].hitHistory) || [],
-        recordedTs: s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : (map[id] && map[id].recordedTs) || Date.now()),
-        setup: s.setup || s
-      };
-      // merge into map (server values preferred)
-      map[id] = { ...(map[id] || {}), ...normalized };
-    }
-    // re-insert any queued pending posts so they remain visible locally until delivered
-    try{
-      const queued = JSON.parse(localStorage.getItem('crt_pending_posts_v1')||'[]');
-      for(const q of queued){ const id = getCanonicalId(q) || q.id; if(!id) continue; if(!map[id]) map[id] = {...q, id}; }
-    }catch(e){ /* ignore queued read errors */ }
-
-    const merged = Object.values(map);
-    saveSetups(merged);
+    const r = await fetch('/api/setups');
+    if(!r.ok) throw new Error('server not available');
+    const j = await r.json();
+    if(!j || !Array.isArray(j.setups)) throw new Error('invalid server response');
+    const server = j.setups.map(row=>{
+      const s = row.setup || {};
+      s.id = row.canonical_id || s.id;
+      s.symbol = s.symbol || row.symbol;
+      s.status = row.status || s.status || 'PENDING';
+      s.origin = s.origin || row.origin;
+      s.entryTs = s.entryTs || row.entry_ts;
+      s.hitHistory = s.hitHistory || row.hit_history || [];
+      s.recordedTs = s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : Date.now());
+      return s;
+    });
+    // Server authoritative: overwrite local storage with server list. Local JSON remains a backup.
+    saveSetups(server);
     refreshSetupViews();
-    // Update sync status UI
-    try{ const el = document.getElementById('syncStatus'); if(el) el.innerText = 'Last sync: ' + new Date().toLocaleString() + ' • server rows: ' + ((server && server.length) || 0); }catch(e){}
   }catch(e){
     console.warn('sync from server failed', e);
     // fallback: keep local JSON as backup
     refreshSetupViews();
-    try{ const el = document.getElementById('syncStatus'); if(el) el.innerText = 'Last sync: failed at ' + new Date().toLocaleString(); }catch(ex){}
   }
 }
 function updateSetupStatus(id, status, reason, resolvedAt){
   const list = loadSetups(); const idx = list.findIndex(s=>s.id===id); if(idx===-1) return; list[idx].status = status; if(reason) list[idx].reason = reason; list[idx].resolvedAt = resolvedAt||Date.now(); saveSetups(list);
 }
-
-// advanced flagging removed per user request
 function exportSetups(){ const data = loadSetups(); const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'crt_setups.json'; a.click(); URL.revokeObjectURL(url); }
 function importSetupsFile(file){
   const reader = new FileReader();
@@ -1609,122 +1168,56 @@ function importSetupsFile(file){
   reader.readAsText(file);
 }
 async function refreshSetupViews(){
-  // Fetch authoritative setups from server only. Do NOT pull from localStorage.
-  let list = [];
+  // Prefer server-authoritative data when available
+  let list = loadSetups();
   try{
-    const server = await fetchServerSetups();
-    if(server && Array.isArray(server)){
-      // Normalize server-provided rows into client-shaped objects
-      list = server.map(row => {
-        const s = row.setup && typeof row.setup === 'object' ? { ...row.setup } : (row || {});
-        // server may already provide top-level fields; normalize them
-        return {
-          id: row.canonical_id || s.id || s.canonical_id || null,
-          symbol: s.symbol || row.symbol || (s.setup && s.setup.symbol) || null,
-          status: row.status || s.status || 'PENDING',
-          origin: s.origin || row.origin || null,
-          entryTs: s.entryTs || row.entry_ts || s.entry_ts || null,
-          recordedTs: s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : null) || null,
-          entry: s.entry || s.tp1 || null,
-          sl: s.sl || null,
-          tp1: s.tp1 || null,
-          tp2: s.tp2 || null,
-          tp3: s.tp3 || null,
-          tp4: s.tp4 || null,
-          tp5: s.tp5 || null,
-          tp6: s.tp6 || null,
-          hitHistory: s.hitHistory || s.hit_history || []
-        };
-      });
-    } else {
-      // server returned no data — keep list empty to remain authoritative
-      list = [];
-    }
-  }catch(e){
-    console.warn('refreshSetupViews: failed to fetch server setups', e);
-    list = [];
-  }
+    const r = await fetch('/api/setups');
+    if(r.ok){ const j = await r.json(); if(j && Array.isArray(j.setups)) list = j.setups.map(row=>{ const s = row.setup||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; }); }
+  }catch(e){ /* fallback to local */ }
   const success = list.filter(s=>s.status==='SUCCESS');
   const fail = list.filter(s=>s.status==='FAILED');
   const pending = list.filter(s=>s.status==='PENDING');
-  document.getElementById('successList').innerHTML = (success.length ? success.map(s=>{
-    const side = (s.side||'').toUpperCase();
-    const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
-    // Determine highest TP hit index from hitHistory
-    const hits = Array.isArray(s.hitHistory) ? s.hitHistory.map(h=> (h.type||'').toString().toUpperCase() ).filter(Boolean) : [];
-    let maxHit = 0;
-    for(const h of hits){ const m = h.match(/TP(\d+)/); if(m && m[1]) maxHit = Math.max(maxHit, parseInt(m[1],10)); }
-    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5,s.tp6];
-    const tpHtml = tps.map((tp, idx)=>{
-      if(!tp) return '';
-      const hit = (idx+1) <= maxHit;
-      const color = hit ? '#10b981' : '#64748b';
-      return `<span style="color:${color}">TP${idx+1}: ${Number(tp).toFixed(2)}</span>`;
-    }).filter(Boolean).join(' • ');
-    const slHtml = `<span style="color:#334155">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
-    const dateStr = s.recordedTs ? new Date(s.recordedTs).toLocaleString() : '';
-    return `<div class="list-item">`+
-      `<div style="display:flex;flex-direction:column;gap:6px">`+
-        `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
-        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}${dateStr? ' • ' + dateStr : ''}</div>`+
-      `</div>`+
-    `</div>`;
-  }).join('') : '—');
-  document.getElementById('failList').innerHTML = (fail.length ? fail.map(s=>{
-    const side = (s.side||'').toUpperCase();
-    const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
-    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5,s.tp6];
-    const tpHtml = tps.map((tp, idx)=> tp ? `<span style="color:#94a3b8">TP${idx+1}: ${Number(tp).toFixed(2)}</span>` : '').filter(Boolean).join(' • ');
-    const slHtml = `<span style="color:#ef4444">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
-    const dateStr = s.recordedTs ? new Date(s.recordedTs).toLocaleString() : '';
-    return `<div class="list-item">`+
-      `<div style="display:flex;flex-direction:column;gap:6px">`+
-        `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
-        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}${dateStr? ' • ' + dateStr : ''}</div>`+
-      `</div>`+
-    `</div>`;
-  }).join('') : '—');
-  const pendingEl = document.getElementById('pendingList');
-  if(pendingEl) pendingEl.innerHTML = (pending.length ? pending.map(s=>{
-    const side = (s.side||'').toUpperCase();
-    const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
-    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5,s.tp6];
-    const tpHtml = tps.map((tp, idx)=> tp ? `<span>TP${idx+1}: ${Number(tp).toFixed(2)}</span>` : '').filter(Boolean).join(' • ');
-    const slHtml = `<span>SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
-    const dateStr = s.recordedTs ? new Date(s.recordedTs).toLocaleString() : '';
-    return `<div class="list-item">`+
-      `<div style="display:flex;flex-direction:column;gap:6px">`+
-        `<div style="font-weight:700;color:${headerColor};">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
-        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}${dateStr? ' • ' + dateStr : ''}</div>`+
-      `</div>`+
-    `</div>`;
-  }).join('') : '—');
-  // Instead of showing raw "pending" waiting setups, display only confirmed/active setups here.
-  try{
-    const confirmed = list.filter(s => (s.status && s.status.toUpperCase() === 'CONFIRMED') || s.serverSynced || (s.status && s.status.toUpperCase() === 'ACTIVE'));
-    if(pendingEl){
-      if(confirmed.length){
-        pendingEl.style.display = '';
-        pendingEl.innerHTML = confirmed.map(s=>{
-          const side = (s.side||'').toUpperCase();
-          const color = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
-          const tp1 = s.tp1 ? s.tp1 : '—';
-          const tp2 = s.tp2 ? s.tp2 : '—';
-          const tp3 = s.tp3 ? s.tp3 : '—';
-          const tp4 = s.tp4 ? s.tp4 : '—';
-          const tp5 = s.tp5 ? s.tp5 : '—';
-          const tp6 = s.tp6 ? s.tp6 : '—';
-          const sl = s.sl ? s.sl : '—';
-          return `<div class="list-item" style="justify-content:space-between;border-bottom:1px solid #0f1724">`+
-            `<div>${s.symbol} • Entry:${s.entry} • SL:${sl} • TP1:${tp1} • TP2:${tp2} • TP3:${tp3} • TP4:${tp4} • TP5:${tp5} • TP6:${tp6} • ${new Date(s.recordedTs).toLocaleString()}</div>`+
-            `<div class="small" style="color:${color}">[${side||'CONFIRMED'}]</div>`+
-            `</div>`;
-        }).join('');
-      } else {
-        pendingEl.innerHTML = '—';
-      }
+  function displaySymbol(sym){
+    const up = (sym||'').toUpperCase();
+    if(up === 'PAXGUSDT' || up === 'PAXGUSD') return 'GOLD';
+    return up || 'ASSET';
+  }
+  function maxTpHit(hitHistory){
+    if(!Array.isArray(hitHistory)) return 0;
+    let max = 0;
+    for(const h of hitHistory){
+      const m = (h && h.type) ? String(h.type).match(/TP(\d)/i) : null;
+      if(m){ max = Math.max(max, Number(m[1])); }
     }
-  }catch(e){ /* ignore UI render errors */ }
+    return max;
+  }
+  function formatTpLine(s, mode){
+    const tps = [s.tp1, s.tp2, s.tp3, s.tp4, s.tp5, s.tp6];
+    const maxHit = maxTpHit(s.hitHistory || s.hit_history || []);
+    const tpParts = tps.map((v, i)=>{
+      const idx = i + 1;
+      const val = (v === undefined || v === null) ? '—' : v;
+      let color = '#6b7280';
+      if(mode === 'success' && maxHit >= idx) color = '#16a34a';
+      if(mode === 'pending') color = '#94a3b8';
+      return `<span style="color:${color}">TP${idx}: ${val}</span>`;
+    });
+    const slColor = mode === 'fail' ? '#ef4444' : '#6b7280';
+    return `${tpParts.join(' • ')} • <span style="color:${slColor}">SL: ${s.sl || '—'}</span>`;
+  }
+  function formatSetupCard(s, mode){
+    const side = (s.side||'').toUpperCase();
+    const color = side === 'BUY' ? '#16a34a' : (side === 'SELL' ? '#dc2626' : '#6b7280');
+    const entry = (s.entry === undefined || s.entry === null) ? '—' : s.entry;
+    const symbol = displaySymbol(s.symbol);
+    const header = `<div style="font-weight:800;color:${color}">${symbol} ${side || 'WAIT'}: <span style="font-weight:800">${entry}</span></div>`;
+    const detail = `<div>${formatTpLine(s, mode)}</div>`;
+    return `<div class="list-item" style="flex-direction:column;align-items:flex-start;border-bottom:1px solid #e5e7eb">${header}${detail}</div>`;
+  }
+  document.getElementById('successList').innerHTML = success.map(s=>formatSetupCard(s, 'success')).join('') || '—';
+  document.getElementById('failList').innerHTML = fail.map(s=>formatSetupCard(s, 'fail')).join('') || '—';
+  const pendingEl = document.getElementById('pendingList');
+  if(pendingEl) pendingEl.innerHTML = (pending.length ? pending.map(s=>formatSetupCard(s, 'pending')).join('') : '—');
   // Success rate counts only decided setups (SUCCESS or FAILED). Pending are ignored.
   const decided = (success.length || 0) + (fail.length || 0);
   const successRate = decided ? Math.round((success.length / decided) * 100) : 0;
@@ -1735,101 +1228,12 @@ async function refreshSetupViews(){
 // fetch server setups (return client-shaped array) - returns null on error
 async function fetchServerSetups(){
   try{
-    // Primary: DB-backed API
-    let r = await fetch('/api/setups');
-    if(r.ok){
-      const j = await r.json();
-      if(j && Array.isArray(j.setups)){
-        // Normalize DB rows to the client-shaped setup objects used elsewhere
-        return j.setups.map(row => {
-          // row may be { canonical_id, symbol, setup(json), status, entry_ts, hit_history, created_at }
-          const s = row.setup && typeof row.setup === 'object' ? { ...row.setup } : (row || {});
-          // prefer canonical fields from row when present
-          s.id = row.canonical_id || s.id || s.canonical_id;
-          s.canonical_id = s.id;
-          s.symbol = s.symbol || row.symbol || (s.setup && s.setup.symbol) || s.symbol;
-          s.status = s.status || row.status || s.status || 'PENDING';
-          s.origin = s.origin || row.origin || s.origin;
-          // entry timestamps: expose as numeric ms in recordedTs/entryTs for client use
-          s.entryTs = s.entryTs || row.entry_ts || s.entry_ts || s.entryTs;
-          s.recordedTs = s.recordedTs || (row.created_at ? (new Date(row.created_at).getTime()) : (s.recordedTs || s.recordedTs));
-          s.hitHistory = s.hitHistory || row.hit_history || s.hit_history || s.hitHistory || [];
-          // keep top-level numeric fields if present on row
-          if(row.entry_ts && !s.entry) s.entry = s.entry || row.entry_ts;
-          if(row.sl && !s.sl) s.sl = row.sl;
-          if(row.tp1 && !s.tp1) s.tp1 = row.tp1;
-          return s;
-        });
-      }
-    }
-  }catch(e){ /* continue to fallback */ }
-  try{
-    // Fallback: static JSON file written by server at /data/paxgusdt_setups.json
-    const f = await fetch('/data/paxgusdt_setups.json');
-    if(f.ok){
-      const arr = await f.json();
-      if(Array.isArray(arr)){
-        // Normalize DB-row-like entries into the same shape used elsewhere
-        return arr.map(item => {
-          if(item && item.setup) return item;
-          const s = item || {};
-          return { canonical_id: s.canonical_id || s.id || (s.setup && s.setup.id), symbol: s.symbol || (s.setup && s.setup.symbol), setup: s.setup || s, status: s.status || (s.setup && s.setup.status) || 'PENDING', entry_ts: s.entry_ts || s.entryTs || (s.setup && s.setup.entryTs) || null, hit_history: s.hit_history || s.hitHistory || (s.setup && s.setup.hitHistory) || [] , created_at: s.created_at || (s.recordedTs? new Date(s.recordedTs).toISOString():null) };
-        });
-      }
-    }
-  }catch(e){ /* continue to fallback */ }
-  try{
-    // Final fallback: localStorage client copy
-    // Do NOT fall back to localStorage — server must be authoritative.
-    // Return empty array when no server/file data is available so clients remain in sync.
-    return [];
+    const r = await fetch('/api/setups');
+    if(!r.ok) return null;
+    const j = await r.json();
+    if(!j || !Array.isArray(j.setups)) return null;
+    return j.setups.map(row=>{ const s = row.setup||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; });
   }catch(e){ return null; }
-}
-
-// Sync JSON fallback file on server with any DB setups missing from the JSON
-async function syncJsonFromDb(){
-  try{
-    // Fetch authoritative DB list
-    const dbRes = await fetch('/api/setups');
-    if(!dbRes.ok) throw new Error('DB /api/setups not available');
-    const dbJson = await dbRes.json();
-    const dbList = Array.isArray(dbJson.setups) ? dbJson.setups : [];
-
-    // Fetch existing JSON fallback (best-effort)
-    let fileList = [];
-    try{
-      const f = await fetch('/data/paxgusdt_setups.json');
-      if(f.ok) fileList = await f.json();
-    }catch(e){ /* ignore */ }
-
-    const fileIds = new Set((fileList || []).map(i => (i.canonical_id || (i.setup && i.setup.id) || i.id)));
-
-    const missing = (dbList || []).filter(r => {
-      const cid = r.canonical_id || (r.setup && r.setup.id) || r.id;
-      return !cid || !fileIds.has(cid) ? !!cid : false;
-    });
-
-    if(!missing.length) return { ok:true, added:0 };
-
-    // Post missing rows to file endpoint one-by-one (server will upsert into data file)
-    const results = [];
-    for(const row of missing){
-      const payload = {
-        canonical_id: row.canonical_id || (row.setup && row.setup.id) || row.id,
-        symbol: row.symbol || (row.setup && row.setup.symbol),
-        setup: row.setup || row,
-        status: row.status || 'PENDING',
-        entry_ts: row.entry_ts || row.entryTs || (row.setup && row.setup.entryTs) || null,
-        hit_history: row.hit_history || row.hitHistory || (row.setup && row.setup.hitHistory) || []
-      };
-      try{
-        const p = await fetch('/api/file/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-        results.push({ row: payload.canonical_id, ok: !!p.ok, status: p.status });
-      }catch(e){ results.push({ row: payload.canonical_id, ok:false, error: String(e) }); }
-    }
-
-    return { ok:true, added: results.filter(r=>r.ok).length, results };
-  }catch(e){ console.warn('syncJsonFromDb failed', e); return { ok:false, error: String(e) }; }
 }
 
 // Render weekly success-rate chart (BUY green, SELL red) for last 7 days
@@ -2044,17 +1448,17 @@ async function checkAllAssetsSignals(){
     let tp3 = null, tp4 = null, tp5 = null, tp6 = null;
     if(symbol === 'PAXGUSDT'){
       if(h1Crt.side === 'BUY'){
-        tp1 = +(entry + 5).toFixed(2);
+        tp1 = +(entry + 4).toFixed(2);
         tp2 = +(entry + 10).toFixed(2);
         tp3 = +(entry + 15).toFixed(2);
         tp4 = +(entry + 20).toFixed(2);
-        tp5 = +(entry + 25).toFixed(2);
+        tp5 = +(entry + 30).toFixed(2);
       } else {
-        tp1 = +(entry - 5).toFixed(2);
+        tp1 = +(entry - 4).toFixed(2);
         tp2 = +(entry - 10).toFixed(2);
         tp3 = +(entry - 15).toFixed(2);
         tp4 = +(entry - 20).toFixed(2);
-        tp5 = +(entry - 25).toFixed(2);
+        tp5 = +(entry - 30).toFixed(2);
       }
       const tp6Raw = tp3Raw;
       tp6 = (tp6Raw && (h1Crt.side === 'BUY' ? tp6Raw > tp5 : tp6Raw < tp5)) ? tp6Raw : null;
@@ -2109,24 +1513,16 @@ async function checkAllAssetsSignals(){
       if(typeof tp4 !== 'undefined' && tp4 !== null) setupObj.tp4 = tp4;
       if(typeof tp5 !== 'undefined' && tp5 !== null) setupObj.tp5 = tp5;
       if(typeof tp6 !== 'undefined' && tp6 !== null) setupObj.tp6 = tp6;
-      // Record the H1-valid setup immediately (always). Advanced validation
-      // will only suppress notifications but will NOT prevent recording/posting.
-      try{
-        addSetupOnce(setupObj);
-        refreshSetupViews();
-      }catch(e){ console.warn('addSetupOnce failed', e); }
-      // Advanced validation removed — no further checks here per user request
+      addSetupOnce(setupObj);
+      refreshSetupViews();
     }catch(e){ console.warn('addSetupOnce failed', e); }
 
     const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=> (typeof x === 'number' ? x.toFixed(2) : x)).join(' / ');
     const tp6Text = tp6 ? (typeof tp6 === 'number' ? tp6.toFixed(2) : tp6) : '—';
-    // Only notify when the H1 checklist meets the minimum threshold (>=2/5 intermediate)
-    if(meetsChecklistThreshold(h1Crt, 2)){
-      notifyUser(symbol,
-        `VERDICT: VALID CRT + M5 CONFIRMED (${h1Crt.side}) — ${getLabelFor(symbol)}`,
-        `H1: ${h1Crt.reason}\nM5: ${m5Confirm.reason}\nEntry: ${entry.toFixed(2)} | SL: ${sl.toFixed(2)} | TPs: ${tpListText} | TP6: ${tp6Text}`
-      );
-    }
+    notifyUser(symbol,
+      `VERDICT: VALID CRT + M5 CONFIRMED (${h1Crt.side}) — ${getLabelFor(symbol)}`,
+      `H1: ${h1Crt.reason}\nM5: ${m5Confirm.reason}\nEntry: ${entry.toFixed(2)} | SL: ${sl.toFixed(2)} | TPs: ${tpListText} | TP6: ${tp6Text}`
+    );
   });
 }
 
@@ -2154,17 +1550,6 @@ applyKeysBtn.addEventListener('click', ()=> {
 // Sidebar and import/export wiring
 document.getElementById('exportJson').addEventListener('click', exportSetups);
 document.getElementById('importFile').addEventListener('change', (e)=>{ if(e.target.files && e.target.files[0]) importSetupsFile(e.target.files[0]); });
-document.getElementById('pushPending').addEventListener('click', async ()=>{
-  try{
-    const res = await syncJsonFromDb();
-    if(res && res.ok){ alert('JSON sync complete — added ' + (res.added||0) + ' rows'); }
-    else { alert('JSON sync failed: ' + (res && res.error ? res.error : 'unknown')); }
-  }catch(e){ alert('JSON sync error: ' + String(e)); }
-  try{ await refreshSetupViews(); }catch(e){}
-});
-// manual sync button
-const syncBtn = document.getElementById('syncNow');
-if(syncBtn){ syncBtn.addEventListener('click', async ()=>{ try{ const el = document.getElementById('syncStatus'); if(el) el.innerText = 'Syncing...'; await syncFromServer(); const el2 = document.getElementById('syncStatus'); if(el2) el2.innerText = 'Last sync: ' + new Date().toLocaleString(); alert('Sync complete'); }catch(e){ alert('Sync failed: '+String(e)); } }); }
   function showView(id){
     // hide all
     ['viewDashboard','viewCRT','viewPending','viewSuccess','viewFail'].forEach(v=>{ const el = document.getElementById(v); if(el) el.style.display = 'none'; });
@@ -2233,13 +1618,9 @@ async function computeDailyOutlook(symbol){
     const d1Crt = analyzeCRTWithData(d1);
     if(d1Crt.status !== 'VALID CRT SETUP') return 'DAY: WAITING';
     const m15Confirm = confirmM15WithD1(m15, d1Crt);
-    // suggested D1-level target (highest high for BUY, lowest low for SELL)
-    const suggestedTarget = (d1Crt.side === 'BUY') ? d1Crt.range.high : d1Crt.range.low;
-    if(m15Confirm.ok){
-      return { status: d1Crt.side, entry: (m15Confirm.entry || suggestedTarget), target: suggestedTarget, side: d1Crt.side };
-    }
-    // D1 is valid but LTF (M15) did not confirm yet — still show BUY/SELL with D1 target
-    return { status: d1Crt.side, entry: suggestedTarget, target: suggestedTarget, side: d1Crt.side, note:'UNCONFIRMED' };
+    if(!m15Confirm.ok) return 'DAY: WAITING';
+    // return object with entry so UI can show target
+    return { status: `DAY: ${d1Crt.side}`, entry: m15Confirm.entry, side: d1Crt.side };
   }catch(e){ return 'Error computing outlook'; }
 }
 
@@ -2327,7 +1708,6 @@ async function refreshDailyOutlooks(){
     const st = (side||'').toString().toUpperCase();
     if(st === 'BUY') return `<span class="px-3 py-1 rounded-full text-white bg-green-600">BUY</span>`;
     if(st === 'SELL') return `<span class="px-3 py-1 rounded-full text-white bg-red-600">SELL</span>`;
-    if(st === 'NO_CRT') return `<span class="px-3 py-1 rounded-full text-white bg-gray-600">NO CRT</span>`;
     return '';
   }
 
@@ -2336,45 +1716,27 @@ async function refreshDailyOutlooks(){
     for(const sym of symbols){
     try{
       const res = await computeDailyOutlook(sym);
-      // Determine explicit UI states: NO_CRT, UNCONFIRMED, or confirmed BUY/SELL
-      let uiState = 'NO_CRT';
-      let entryText = null;
-      let d1TargetText = null;
+      // res may be string like 'DAY: BUY' or an object. Prefer showing target when available.
+      let status = 'WAITING';
+      let targetText = null;
       if(typeof res === 'string'){
-        if(/WAITING|DATA ERROR|ERROR/i.test(res)){
-          uiState = 'NO_CRT';
-        } else {
-          const m = res.match(/\b(BUY|SELL)\b/i);
-          uiState = m ? m[1].toUpperCase() : 'NO_CRT';
-        }
-      } else if(res && typeof res === 'object'){
-        const m = (res.status||'').match(/\b(BUY|SELL)\b/i);
-        if(m) uiState = m[1].toUpperCase();
-        if(res.entry) entryText = `Entry: ${Number(res.entry).toFixed(2)}`;
-        if(res.target) d1TargetText = `D1 target: ${Number(res.target).toFixed(2)}`;
-        if(res.note && d1TargetText) d1TargetText += ` (${res.note})`;
-        if(m && res.note === 'UNCONFIRMED') uiState = 'UNCONFIRMED';
+        const m = res.match(/\b(BUY|SELL|WAITING)\b/i);
+        status = m ? m[1].toUpperCase() : res;
+      } else if(res && res.status){
+        status = res.status;
       }
-
+      // if res provides entry/TP info, show target amount in KPI value
+      if(res && res.entry){ targetText = `Entry ${Number(res.entry).toFixed(2)}`; }
       const el = document.getElementById(idMap[sym]);
       const badgeEl = document.getElementById(idBadgeMap[sym]);
       if(el){
-        if(uiState === 'NO_CRT'){
-          el.innerHTML = mutedWaiting('NO CRT');
-        } else if(uiState === 'UNCONFIRMED'){
-          el.innerHTML = d1TargetText ? `<div style="font-weight:700">${d1TargetText}</div><div class="small muted">UNCONFIRMED</div>` : `<div class="small muted">UNCONFIRMED</div>`;
+        if(status === 'WAITING'){
+          el.innerHTML = targetText ? `<div style="font-weight:700">${targetText}</div>` : mutedWaiting('Waiting');
         } else {
-          let html = '';
-          if(entryText) html += `<div style="font-weight:700">${entryText}</div>`;
-          if(d1TargetText) html += `<div class="small muted">${d1TargetText}</div>`;
-          el.innerHTML = html || '';
+          el.innerHTML = targetText ? `<div style="font-weight:700">${targetText}</div>` : '';
         }
       }
-      if(badgeEl){
-        if(uiState === 'NO_CRT') badgeEl.innerHTML = badgeForSide('NO_CRT');
-        else if(uiState === 'UNCONFIRMED') badgeEl.innerHTML = `<span class="px-3 py-1 rounded-full text-white bg-yellow-600">UNCONFIRMED</span>`;
-        else badgeEl.innerHTML = badgeForSide(uiState);
-      }
+      if(badgeEl) badgeEl.innerHTML = badgeForSide(status);
     }catch(e){ console.warn('daily outlook error', e); }
   }
 }
