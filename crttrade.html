@@ -1634,40 +1634,57 @@ async function refreshSetupViews(){
   const success = list.filter(s=>s.status==='SUCCESS');
   const fail = list.filter(s=>s.status==='FAILED');
   const pending = list.filter(s=>s.status==='PENDING');
-  document.getElementById('successList').innerHTML = success.map(s=>{
-    const reason = (s.reason||'').toUpperCase();
-    let badge = '';
-    if(reason === 'ALL_TP') badge = `<span class="small" style="color:#ffffff;background:#3b82f6;padding:4px 8px;border-radius:8px">ALL TP HIT</span>`;
-    else if(reason === 'TP2') badge = `<span class="small" style="color:#ffffff;background:#10b981;padding:4px 8px;border-radius:8px">TP2 HIT</span>`;
-    else if(reason === 'TP1') badge = `<span class="small" style="color:#ffffff;background:#10b981;padding:4px 8px;border-radius:8px">TP1 HIT</span>`;
-    else badge = `<span class="small" style="color:#ffffff;background:#94a3b8;padding:4px 8px;border-radius:8px">DONE</span>`;
-        return `<div class="list-item" style="justify-content:space-between;border-bottom:1px solid #0f1724">`+
-          `<div>${s.symbol} • Entry:${s.entry} • SL:${s.sl} • TP1:${s.tp1||'—'} • TP2:${s.tp2||'—'} • TP3:${s.tp3||'—'} • TP4:${s.tp4||'—'} • TP5:${s.tp5||'—'} • TP6:${s.tp6||'—'} • ${new Date(s.recordedTs).toLocaleString()}</div>`+
-          `<div>${badge}</div>`+
-          `</div>`;
-  }).join('') || '—';
-  document.getElementById('failList').innerHTML = fail.map(s=>{
-    const badge = `<span class="small" style="color:#ffffff;background:#ef4444;padding:4px 8px;border-radius:8px">SL</span>`;
-        return `<div class="list-item" style="justify-content:space-between;border-bottom:1px solid #0f1724">`+
-          `<div>${s.symbol} • Entry:${s.entry} • SL:${s.sl} • TP1:${s.tp1||'—'} • TP2:${s.tp2||'—'} • TP3:${s.tp3||'—'} • TP4:${s.tp4||'—'} • TP5:${s.tp5||'—'} • TP6:${s.tp6||'—'} • ${new Date(s.recordedTs).toLocaleString()}</div>`+
-          `<div>${badge}</div>`+
-          `</div>`;
-  }).join('') || '—';
+  document.getElementById('successList').innerHTML = (success.length ? success.map(s=>{
+    const side = (s.side||'').toUpperCase();
+    const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
+    // Determine highest TP hit index from hitHistory
+    const hits = Array.isArray(s.hitHistory) ? s.hitHistory.map(h=> (h.type||'').toString().toUpperCase() ).filter(Boolean) : [];
+    let maxHit = 0;
+    for(const h of hits){ const m = h.match(/TP(\d+)/); if(m && m[1]) maxHit = Math.max(maxHit, parseInt(m[1],10)); }
+    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5];
+    const tpHtml = tps.map((tp, idx)=>{
+      if(!tp) return '';
+      const hit = (idx+1) <= maxHit;
+      const color = hit ? '#10b981' : '#64748b';
+      return `<span style="color:${color};font-weight:${hit?700:400}">TP${idx+1}: ${Number(tp).toFixed(2)}</span>`;
+    }).filter(Boolean).join(' • ');
+    const slHtml = `<span style="color:#334155">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
+    return `<div class="list-item">`+
+      `<div style="display:flex;flex-direction:column;gap:6px">`+
+        `<div style="font-weight:800;color:${headerColor};font-size:1rem">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
+        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
+      `</div>`+
+      `<div class="small" style="color:${headerColor}">[${side||'SUCCESS'}]</div>`+
+    `</div>`;
+  }).join('') : '—');
+  document.getElementById('failList').innerHTML = (fail.length ? fail.map(s=>{
+    const side = (s.side||'').toUpperCase();
+    const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
+    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5];
+    const tpHtml = tps.map((tp, idx)=> tp ? `<span style="color:#94a3b8">TP${idx+1}: ${Number(tp).toFixed(2)}</span>` : '').filter(Boolean).join(' • ');
+    const slHtml = `<span style="color:#ef4444;font-weight:700">SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
+    return `<div class="list-item">`+
+      `<div style="display:flex;flex-direction:column;gap:6px">`+
+        `<div style="font-weight:800;color:${headerColor};font-size:1rem">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
+        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
+      `</div>`+
+      `<div class="small" style="color:#ef4444">[SL]</div>`+
+    `</div>`;
+  }).join('') : '—');
   const pendingEl = document.getElementById('pendingList');
   if(pendingEl) pendingEl.innerHTML = (pending.length ? pending.map(s=>{
     const side = (s.side||'').toUpperCase();
-    const color = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
-    const tp1 = s.tp1 ? s.tp1 : '—';
-    const tp2 = s.tp2 ? s.tp2 : '—';
-        const tp3 = s.tp3 ? s.tp3 : '—';
-        const tp4 = s.tp4 ? s.tp4 : '—';
-        const tp5 = s.tp5 ? s.tp5 : '—';
-        const tp6 = s.tp6 ? s.tp6 : '—';
-        const sl = s.sl ? s.sl : '—';
-        return `<div class="list-item" style="justify-content:space-between;border-bottom:1px solid #0f1724">`+
-          `<div>${s.symbol} • Entry:${s.entry} • SL:${sl} • TP1:${tp1} • TP2:${tp2} • TP3:${tp3} • TP4:${tp4} • TP5:${tp5} • TP6:${tp6} • ${new Date(s.recordedTs).toLocaleString()}</div>`+
-          `<div class="small" style="color:${color}">[${side||'WAITING'}]</div>`+
-          `</div>`;
+    const headerColor = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
+    const tps = [s.tp1,s.tp2,s.tp3,s.tp4,s.tp5];
+    const tpHtml = tps.map((tp, idx)=> tp ? `<span>TP${idx+1}: ${Number(tp).toFixed(2)}</span>` : '').filter(Boolean).join(' • ');
+    const slHtml = `<span>SL: ${s.sl?Number(s.sl).toFixed(2):'—'}</span>`;
+    return `<div class="list-item">`+
+      `<div style="display:flex;flex-direction:column;gap:6px">`+
+        `<div style="font-weight:800;color:${headerColor};font-size:1rem">${s.symbol} ${side} • ${s.entry?Number(s.entry).toFixed(2):'—'}</div>`+
+        `<div class="small" style="color:#64748b">${tpHtml}${tpHtml && slHtml ? ' • ' : ''}${slHtml}</div>`+
+      `</div>`+
+      `<div class="small" style="color:${headerColor}">[${side||'PENDING'}]</div>`+
+    `</div>`;
   }).join('') : '—');
   // Instead of showing raw "pending" waiting setups, display only confirmed/active setups here.
   try{
