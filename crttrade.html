@@ -25,6 +25,13 @@
   .kpi-label{ color:#6b7280; font-size:0.9rem; }
   .badge-buy{ background:#dcfce7; color:#065f46; padding:6px 10px; border-radius:999px; font-weight:700 }
   .badge-sell{ background:#fee2e2; color:#991b1b; padding:6px 10px; border-radius:999px; font-weight:700 }
+  .d1-label{ color:#6b7280; font-size:0.9rem; }
+  .d1-entry{ font-size:1.25rem; font-weight:700; color:#0f172a; margin-top:6px; }
+  .d1-target{ color:#94a3b8; font-weight:600; margin-top:4px; }
+  .d1-pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 14px; border-radius:999px; font-weight:700; margin-top:10px; }
+  .d1-pill.buy{ background:#dcfce7; color:#047857; }
+  .d1-pill.sell{ background:#fee2e2; color:#b91c1c; }
+  .d1-pill.wait{ background:#e5e7eb; color:#6b7280; }
   /* dashboard chart card sizing */
   #dashboardSuccessChart{ width:100% !important; height:180px !important }
   html,body{height:100%}
@@ -68,9 +75,10 @@
             <h2 class="text-xl font-semibold">Dashboard — Inzalo Yamaqhawe Trading</h2>
             <div class="mt-4 kpi-grid">
               <div class="light-card" id="cardPAXG">
-                <div class="kpi-label">PAXG</div>
-                <div class="kpi-value" id="paxgOutlook">—</div>
-                <div class="mt-2 badge-sell" id="paxgBadge">SELL</div>
+                <div class="d1-label">PAXG</div>
+                <div class="d1-entry" id="paxgEntry">Entry: —</div>
+                <div class="d1-target" id="paxgTarget">D1 target: —</div>
+                <div class="d1-pill wait" id="paxgBadge">WAITING</div>
               </div>
             </div>
             <div class="mt-4">Success Rate: <span id="successRate">0%</span></div>
