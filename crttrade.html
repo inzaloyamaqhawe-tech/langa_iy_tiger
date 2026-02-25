@@ -1195,15 +1195,8 @@ function addSetupOnce(setup){
   const obj = roundSetupPrices({...setup, id, status:'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: [] });
   list.push(obj);
   saveSetups(list);
-  // Immediately attempt to post this new setup to the central server (best-effort).
-  // Server will upsert by canonical_id so this is non-destructive; keeping this
-  // ensures multi-device persistence works out-of-the-box.
-  pushSetupToServer(obj).then(r=>{
-    if(!r || !r.ok) console.warn('Initial pushSetupToServer failed', r && r.status);
-    else console.log('Initial pushSetupToServer succeeded', obj.id);
-  }).catch(e=>{ console.warn('pushSetupToServer error', e); });
-  // Also run the guarded auto-post/merge routine (keeps local copy in sync if server already has row)
-  tryAutoPost(obj).catch(e=>console.warn('auto-post error', e));
+  // Ensure setup is visible to other devices: post only if DB does not already contain it.
+  ensureSetupPostedForDevices(obj).catch(e=>console.warn('ensureSetupPostedForDevices error', e));
 }
 // Push setup to server (best-effort, non-blocking). Server requires DATABASE_URL configured.
 async function apiUpsertSetup(s){
@@ -1216,6 +1209,33 @@ async function apiUpsertSetup(s){
 function pushSetupToServer(s){
   const rounded = roundSetupPrices(s);
   return fetch('/api/setups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ canonical_id: rounded.id, symbol: rounded.symbol, setup: rounded, status: rounded.status, origin: rounded.origin, entry_ts: rounded.entryTs || rounded.recordedTs }) });
+}
+
+// Check if a setup is already present in central DB (possibly posted by another device)
+async function setupExistsOnServer(canonicalId){
+  if(!canonicalId) return false;
+  try{
+    const r = await fetch('/api/setups');
+    if(!r.ok) return false;
+    const j = await r.json();
+    if(!j || !Array.isArray(j.setups)) return false;
+    return j.setups.some(row => row && row.canonical_id === canonicalId);
+  }catch(e){
+    return false;
+  }
+}
+
+// Cross-device publish rule: only post when DB does not already have this setup
+async function ensureSetupPostedForDevices(s){
+  if(!s || !s.id) return;
+  const exists = await setupExistsOnServer(s.id);
+  if(exists) return;
+  try{
+    const r = await pushSetupToServer(s);
+    if(!r || !r.ok) console.warn('ensureSetupPostedForDevices failed', r && r.status);
+  }catch(e){
+    console.warn('ensureSetupPostedForDevices error', e);
+  }
 }
 
 // Patch an existing setup on the server with new status/hitHistory (best-effort)
@@ -1271,8 +1291,8 @@ async function tryAutoPost(s){
       }
       return;
     }
-    // not present — push as a new setup
-    await pushSetupToServer(s);
+    // not present — publish for cross-device visibility
+    await ensureSetupPostedForDevices(s);
     console.log('Auto-pushed setup to server', s.id);
   }catch(e){ console.warn('tryAutoPost failed', e); }
 }
@@ -1295,8 +1315,10 @@ async function syncFromServer(){
       s.recordedTs = s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : Date.now());
       return s;
     });
-    // Server authoritative: overwrite local storage with server list. Local JSON remains a backup.
-    saveSetups(server);
+    // Merge server + local non-destructively so freshly confirmed local pending setups
+    // are not hidden if server returns stale/empty results.
+    const local = loadSetups();
+    saveSetups([...(local || []), ...(server || [])]);
     refreshSetupViews();
   }catch(e){
     console.warn('sync from server failed', e);
@@ -1339,11 +1361,18 @@ function importSetupsFile(file){
   reader.readAsText(file);
 }
 async function refreshSetupViews(){
-  // Prefer server-authoritative data when available
-  let list = loadSetups();
+  // Merge local + server so confirmed pending setups show immediately.
+  const localList = loadSetups();
+  let list = localList;
   try{
     const r = await fetch('/api/setups');
-    if(r.ok){ const j = await r.json(); if(j && Array.isArray(j.setups)) list = j.setups.map(row=>{ const s = row.setup||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; }); }
+    if(r.ok){
+      const j = await r.json();
+      if(j && Array.isArray(j.setups)){
+        const serverList = j.setups.map(row=>{ const s = row.setup||{}; s.id = row.canonical_id||s.id; s.symbol = s.symbol||row.symbol; s.status = row.status||s.status||'PENDING'; s.origin = s.origin||row.origin; s.entryTs = s.entryTs||row.entry_ts; s.hitHistory = s.hitHistory||row.hit_history||[]; s.recordedTs = s.recordedTs|| (row.created_at? new Date(row.created_at).getTime():Date.now()); return s; });
+        list = normalizeSetupsArray([...(localList || []), ...(serverList || [])]);
+      }
+    }
   }catch(e){ /* fallback to local */ }
   const sortByLatest = (a,b)=>{
     const ta = Number(a.resolvedAt || a.updatedAt || a.recordedTs || a.entryTs || 0);
