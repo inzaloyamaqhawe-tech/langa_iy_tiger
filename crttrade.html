@@ -7,6 +7,10 @@
 
 <!-- Tailwind for quick styling -->
 <script src="https://cdn.tailwindcss.com"></script>
+<!-- Modern UI font -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 
 <!-- Chart.js and financial plugin -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
@@ -44,6 +48,34 @@
   .list-scroll{max-height:20rem; overflow:auto}
   .list-item{padding:10px 0; min-height:40px; display:flex;align-items:center}
   .muted { color:#9fb0cc; font-size:0.9rem }
+/* Additional polished styles */
+  .app-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.3)); box-shadow:0 6px 18px rgba(9,30,66,0.06); }
+  .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem }
+  .logo img{ height:36px; width:36px; border-radius:8px; box-shadow:0 6px 14px rgba(2,6,23,0.08); }
+  .controls{ display:flex; gap:8px; align-items:center }
+  .card{ box-shadow: 0 8px 24px rgba(15,23,36,0.06); }
+  .light-card{ box-shadow: 0 6px 20px rgba(15,23,36,0.04); }
+  .btn{ transition:all .18s ease; }
+  .btn:hover{ transform:translateY(-2px); box-shadow:0 10px 24px rgba(2,6,23,0.06); }
+  .btn-navy{ background:linear-gradient(180deg,var(--accent),#1e40af); border:none }
+  .btn-black{ background:linear-gradient(180deg,#0f1724,#0b1220); color:#fff; border:none }
+  .select, .input { box-shadow: inset 0 1px 0 rgba(255,255,255,0.02), 0 2px 6px rgba(2,6,23,0.03); }
+
+  /* Chart container with subtle 3D illusion (canvas remains flat but framed) */
+  .canvas-wrap{ position:relative; padding:12px; border-radius:14px; background:linear-gradient(180deg,#fbfdff,#eef6ff); box-shadow: 0 20px 50px rgba(2,6,23,0.06), inset 0 1px 0 rgba(255,255,255,0.6); }
+  .canvas-wrap:before{ content:''; position:absolute; left:12px; right:12px; top:8px; bottom:8px; border-radius:12px; pointer-events:none; box-shadow: 0 18px 40px rgba(2,6,23,0.06); transform:translateY(6px); opacity:0.6 }
+  #chartArea{ background:linear-gradient(180deg,#ffffff,#f7fbff); border-radius:12px; padding:8px; }
+  canvas.chart-canvas{ border-radius:10px; box-shadow: 0 22px 48px rgba(2,6,23,0.08); }
+
+  /* Candles: keep color codes, use stroke-like effect via overlay for perceived depth */
+  .candle-3d-overlay{ position:absolute; inset:0; pointer-events:none; mix-blend-mode:overlay; border-radius:10px }
+
+  /* Refined lists */
+  .list-item{ padding:12px 0; border-bottom:1px solid rgba(15,23,36,0.03); display:flex; justify-content:space-between; align-items:center }
+  .list-item .small{ color:#64748b }
+
+  /* Responsive tweaks */
+  @media(min-width:1024px){ .kpi-grid{ grid-template-columns:repeat(4,1fr) } }
 </style>
 </head>
 <body>
@@ -80,7 +112,7 @@
 
             <div class="mt-4 light-card">
               <h3 class="font-semibold">Weekly Success Rate (Last 7 days)</h3>
-              <div class="mt-2"><canvas id="dashboardSuccessChart" height="180"></canvas></div>
+              <div class="mt-2"><canvas id="dashboardSuccessChart" class="chart-canvas" height="180"></canvas></div>
             </div>
           </div>
         </div>
@@ -148,7 +180,7 @@
                 <div id="candleCloseInfo_view" class="small">Candle closes at: —</div>
               </div>
             </div>
-            <div id="chartArea_view" class="mt-3"><canvas id="mainChart_view"></canvas></div>
+            <div id="chartArea_view" class="mt-3 canvas-wrap"><canvas id="mainChart_view" class="chart-canvas"></canvas></div>
             <div class="mt-2 small muted">CRT-only entries. Alerts only when valid CRT is detected.</div>
           </div>
 
@@ -1038,10 +1070,18 @@ async function updateLiveAndCRT(force=false){
       if(!existing){
         const entry = m5Confirm.entry || h1Crt.range.mid;
         const setupObj = { symbol: RUNTIME.symbol, side: h1Crt.side, entry, sl: getFixedSL(RUNTIME.symbol, entry, h1Crt.side), tp1: h1Crt.range.mid, tp2: h1Crt.side === 'BUY' ? h1Crt.range.high : h1Crt.range.low, h1_ts, ref: h1Crt.ref };
-        // additional TPs if present on h1Crt or m5Confirm
         if(m5Confirm && m5Confirm.zone){ setupObj.zone = m5Confirm.zone; }
-        addSetupOnce(setupObj);
+        // Persist locally and then attempt a single immediate push for confirmed setups.
+        const stored = addSetupOnce(setupObj);
         console.info('Recorded setup on M5 confirmation', cid);
+        try{
+          const res = await pushSetupToServer(stored);
+          if(res && res.dbOk){
+            try{ const body = await safeParseJson(res.dbResp); markSetupServerSynced(stored, body||null); }catch(e){}
+          } else {
+            console.warn('Confirmed setup push failed (no enqueue):', cid, res);
+          }
+        }catch(e){ console.warn('push error for confirmed setup', e); }
       } else {
         // existing local setup found — if not serverSynced try to push again
         if(existing && !existing.serverSynced){
@@ -1166,33 +1206,12 @@ function addSetupOnce(setup){
   if(list.find(s=>getCanonicalId(s) === id)) return; // already recorded by canonical id
   const client = getClientId();
   const now = Date.now();
+  // Only persist locally here. Posting should occur only for confirmed (M5) setups
+  // to avoid creating "waiting"/pending server posts for unconfirmed HTF-only signals.
   const obj = {...setup, id, status:'PENDING', recordedTs: now, entryTs: setup.entryTs || now, origin: client, hitHistory: [] };
   list.push(obj);
   saveSetups(list);
-  // Attempt to post this new setup to central server and file endpoint. If posting fails,
-  // enqueue for retry via localStorage so we ensure eventual delivery.
-  pushSetupToServer(obj).then(results=>{
-    if(!results){
-      console.warn('Initial pushSetupToServer returned no results');
-      enqueuePending(obj, { db: true, file: true });
-      return;
-    }
-    const { dbOk, fileOk } = results;
-    if(dbOk && fileOk){
-      console.log('Initial pushSetupToServer succeeded (both)', obj.id);
-    } else if(dbOk && !fileOk){
-      console.warn('DB posted but file endpoint failed — enqueue file target', obj.id);
-      enqueuePending(obj, { db: false, file: true });
-    } else if(!dbOk && fileOk){
-      console.warn('File posted but DB failed — enqueue DB target', obj.id);
-      enqueuePending(obj, { db: true, file: false });
-    } else {
-      console.warn('Both DB and file post failed — enqueue both', obj.id);
-      enqueuePending(obj, { db: true, file: true });
-    }
-  }).catch(e=>{ console.warn('pushSetupToServer error', e); enqueuePending(obj, { db: true, file: true }); });
-  // Also run the guarded auto-post/merge routine (keeps local copy in sync if server already has row)
-  tryAutoPost(obj).catch(e=>console.warn('auto-post error', e));
+  return obj;
 }
 
 // Retry any pending posts stored in localStorage every 60s
@@ -1577,6 +1596,32 @@ async function refreshSetupViews(){
           `<div class="small" style="color:${color}">[${side||'WAITING'}]</div>`+
           `</div>`;
   }).join('') : '—');
+  // Instead of showing raw "pending" waiting setups, display only confirmed/active setups here.
+  try{
+    const confirmed = list.filter(s => (s.status && s.status.toUpperCase() === 'CONFIRMED') || s.serverSynced || (s.status && s.status.toUpperCase() === 'ACTIVE'));
+    if(pendingEl){
+      if(confirmed.length){
+        pendingEl.style.display = '';
+        pendingEl.innerHTML = confirmed.map(s=>{
+          const side = (s.side||'').toUpperCase();
+          const color = side === 'BUY' ? '#10b981' : (side === 'SELL' ? '#ef4444' : '#7c3aed');
+          const tp1 = s.tp1 ? s.tp1 : '—';
+          const tp2 = s.tp2 ? s.tp2 : '—';
+          const tp3 = s.tp3 ? s.tp3 : '—';
+          const tp4 = s.tp4 ? s.tp4 : '—';
+          const tp5 = s.tp5 ? s.tp5 : '—';
+          const tp6 = s.tp6 ? s.tp6 : '—';
+          const sl = s.sl ? s.sl : '—';
+          return `<div class="list-item" style="justify-content:space-between;border-bottom:1px solid #0f1724">`+
+            `<div>${s.symbol} • Entry:${s.entry} • SL:${sl} • TP1:${tp1} • TP2:${tp2} • TP3:${tp3} • TP4:${tp4} • TP5:${tp5} • TP6:${tp6} • ${new Date(s.recordedTs).toLocaleString()}</div>`+
+            `<div class="small" style="color:${color}">[${side||'CONFIRMED'}]</div>`+
+            `</div>`;
+        }).join('');
+      } else {
+        pendingEl.innerHTML = '—';
+      }
+    }
+  }catch(e){ /* ignore UI render errors */ }
   // Success rate counts only decided setups (SUCCESS or FAILED). Pending are ignored.
   const decided = (success.length || 0) + (fail.length || 0);
   const successRate = decided ? Math.round((success.length / decided) * 100) : 0;
