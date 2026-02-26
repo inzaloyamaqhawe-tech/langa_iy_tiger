@@ -56,6 +56,12 @@ function normalizeHitHistory(value){
   return parsed === undefined || parsed === null ? [] : parsed;
 }
 
+function normalizeSetupSymbol(symbol){
+  const upper = String(symbol || '').toUpperCase();
+  if(upper === 'PAXGUSD' || upper === 'PAXGUSDT') return 'PAXGUSDT';
+  return upper;
+}
+
 function applySymbolTpProfile(sym, setup, cid){
   if(!setup || !sym) return setup;
   const out = { ...setup };
@@ -234,8 +240,8 @@ app.get('/api/setups', async (req,res)=>{
   if(!db) return res.status(503).json({ error:'database not configured', message:'Set DATABASE_URL env var on the server and redeploy.' });
   try{
     await ensureSetupsSchema();
-    // Only return PAXGUSDT setups (system now restricted to PAXGUSD)
-    const q = await db.query("SELECT canonical_id, symbol, setup, status, origin, entry_ts, hit_history, created_at, updated_at FROM setups WHERE upper(symbol) = 'PAXGUSDT' ORDER BY created_at DESC LIMIT 1000");
+    // Return GOLD setups with symbol aliases normalized at read boundary.
+    const q = await db.query("SELECT canonical_id, symbol, setup, status, origin, entry_ts, hit_history, created_at, updated_at FROM setups WHERE upper(symbol) IN ('PAXGUSDT','PAXGUSD') ORDER BY created_at DESC LIMIT 1000");
     return res.json({ setups: q.rows });
   }catch(e){ console.error(e); return res.status(500).json({ error:'db error', detail:e.message, code:e.code }); }
 });
@@ -245,16 +251,18 @@ app.post('/api/setups', async (req,res)=>{
   if(!db) return res.status(503).json({ error:'database not configured', message:'Set DATABASE_URL env var on the server and redeploy.' });
   const payload = req.body || {};
   const canonical_id = payload.canonical_id || payload.setup?.canonical_id;
-  const symbol = payload.symbol || payload.setup?.symbol;
+  const symbolRaw = payload.symbol || payload.setup?.symbol;
+  const symbol = normalizeSetupSymbol(symbolRaw);
   const setup = payload.setup || payload;
   const status = payload.status || setup.status || 'PENDING';
   const origin = payload.origin || setup.origin || null;
   const entry_ts = normalizeEntryTs(payload.entry_ts ?? setup.entryTs ?? null);
   if(!canonical_id || !symbol) return res.status(400).json({ error:'canonical_id and symbol required' });
-  // Enforce whitelist: only allow PAXGUSDT setups going forward
-  if(String(symbol).toUpperCase() !== 'PAXGUSDT'){
+  // Enforce whitelist: only allow GOLD aliases (stored as PAXGUSDT)
+  if(symbol !== 'PAXGUSDT'){
     return res.status(403).json({ error:'Only PAXGUSDT setups are accepted by this service' });
   }
+  if(setup && typeof setup === 'object') setup.symbol = symbol;
   try{
     const normalized = applySymbolTpProfile(symbol, setup, canonical_id);
     if(normalized) Object.assign(setup, normalized);
@@ -264,6 +272,7 @@ app.post('/api/setups', async (req,res)=>{
     await ensureSetupsSchema();
     const hitHistory = normalizeHitHistory(payload.hitHistory ?? setup.hitHistory ?? setup.hit_history ?? []);
     const values = [canonical_id, symbol, setup, status, origin, entry_ts, JSON.stringify(hitHistory)];
+    let action = 'updated';
     const upd = await db.query(
       `UPDATE setups
        SET symbol = $2, setup = $3, status = $4, origin = $5, entry_ts = $6, hit_history = $7::jsonb, updated_at = now()
@@ -276,7 +285,9 @@ app.post('/api/setups', async (req,res)=>{
          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb, now(), now())`,
         values
       );
+      action = 'inserted';
     }
+    console.log('[SETUPS UPSERT OK]', { action, canonical_id, symbol, status, entry_ts });
     return res.json({ ok:true });
   }catch(e){ console.error('upsert failed', e); return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
 });
@@ -300,7 +311,7 @@ app.patch('/api/setups/:canonical', async (req,res)=>{
   values.push(canonical);
   const sql = `UPDATE setups SET ${fields.join(',')}, updated_at = now() WHERE canonical_id = $${idx}`;
   try{ await ensureSetupsSchema(); }catch(e){ return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
-  try{ await db.query(sql, values); return res.json({ ok:true }); }catch(e){ console.error('patch failed', e); return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
+  try{ await db.query(sql, values); console.log('[SETUPS PATCH OK]', { canonical_id: canonical, fields: fields.length }); return res.json({ ok:true }); }catch(e){ console.error('patch failed', e); return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
 });
 
 // Admin cleanup: delete setups for symbol patterns (protected by setupsAuth)
