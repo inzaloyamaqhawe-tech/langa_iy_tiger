@@ -168,9 +168,45 @@ app.get('/health', (req,res)=> res.json({ ok:true, ts:Date.now() }));
 
 // Postgres pool (enabled when DATABASE_URL is set)
 let db = null;
+let setupsSchemaReady = null;
 if(process.env.DATABASE_URL){
   db = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized:false } });
   db.connect().then(c=>{ c.release(); console.log('Postgres pool connected'); }).catch(e=>{ console.error('Postgres connection failed', e.message); db=null; });
+}
+
+async function ensureSetupsSchema(){
+  if(!db) return;
+  if(setupsSchemaReady) return setupsSchemaReady;
+  setupsSchemaReady = (async ()=>{
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS setups (
+        canonical_id text NOT NULL,
+        symbol text,
+        setup jsonb,
+        status text DEFAULT 'PENDING',
+        origin text,
+        entry_ts bigint,
+        hit_history jsonb DEFAULT '[]'::jsonb,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      )
+    `);
+    await db.query(`ALTER TABLE setups ADD COLUMN IF NOT EXISTS symbol text`);
+    await db.query(`ALTER TABLE setups ADD COLUMN IF NOT EXISTS setup jsonb`);
+    await db.query(`ALTER TABLE setups ADD COLUMN IF NOT EXISTS status text DEFAULT 'PENDING'`);
+    await db.query(`ALTER TABLE setups ADD COLUMN IF NOT EXISTS origin text`);
+    await db.query(`ALTER TABLE setups ADD COLUMN IF NOT EXISTS entry_ts bigint`);
+    await db.query(`ALTER TABLE setups ADD COLUMN IF NOT EXISTS hit_history jsonb DEFAULT '[]'::jsonb`);
+    await db.query(`ALTER TABLE setups ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now()`);
+    await db.query(`ALTER TABLE setups ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now()`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_setups_canonical_id ON setups(canonical_id)`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_setups_symbol ON setups(symbol)`);
+    return true;
+  })().catch(err=>{
+    setupsSchemaReady = null;
+    throw err;
+  });
+  return setupsSchemaReady;
 }
 
 function setupsAuth(req){
@@ -185,10 +221,11 @@ app.get('/api/setups', async (req,res)=>{
   if(!setupsAuth(req)) return res.status(401).json({ error:'unauthorized' });
   if(!db) return res.status(503).json({ error:'database not configured', message:'Set DATABASE_URL env var on the server and redeploy.' });
   try{
+    await ensureSetupsSchema();
     // Only return PAXGUSDT setups (system now restricted to PAXGUSD)
     const q = await db.query("SELECT canonical_id, symbol, setup, status, origin, entry_ts, hit_history, created_at, updated_at FROM setups WHERE upper(symbol) = 'PAXGUSDT' ORDER BY created_at DESC LIMIT 1000");
     return res.json({ setups: q.rows });
-  }catch(e){ console.error(e); return res.status(500).json({ error:'db error' }); }
+  }catch(e){ console.error(e); return res.status(500).json({ error:'db error', detail:e.message, code:e.code }); }
 });
 
 app.post('/api/setups', async (req,res)=>{
@@ -212,17 +249,21 @@ app.post('/api/setups', async (req,res)=>{
     Object.assign(setup, roundSetupPriceFields(setup));
   }catch(e){ console.error('normalize error', e); }
   try{
-    await db.query(
-      `INSERT INTO setups (canonical_id, symbol, setup, status, origin, entry_ts, hit_history) VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (canonical_id) DO UPDATE SET
-         setup = EXCLUDED.setup,
-         status = EXCLUDED.status,
-         origin = EXCLUDED.origin,
-         entry_ts = EXCLUDED.entry_ts,
-         hit_history = EXCLUDED.hit_history,
-         updated_at = now()`
-      ,[canonical_id, symbol, setup, status, origin, entry_ts, setup.hitHistory || []]
+    await ensureSetupsSchema();
+    const values = [canonical_id, symbol, setup, status, origin, entry_ts, setup.hitHistory || []];
+    const upd = await db.query(
+      `UPDATE setups
+       SET symbol = $2, setup = $3, status = $4, origin = $5, entry_ts = $6, hit_history = $7, updated_at = now()
+       WHERE canonical_id = $1`,
+      values
     );
+    if((upd.rowCount || 0) === 0){
+      await db.query(
+        `INSERT INTO setups (canonical_id, symbol, setup, status, origin, entry_ts, hit_history, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7, now(), now())`,
+        values
+      );
+    }
     return res.json({ ok:true });
   }catch(e){ console.error('upsert failed', e); return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
 });
@@ -245,6 +286,7 @@ app.patch('/api/setups/:canonical', async (req,res)=>{
   if(fields.length===0) return res.status(400).json({ error:'nothing to update' });
   values.push(canonical);
   const sql = `UPDATE setups SET ${fields.join(',')}, updated_at = now() WHERE canonical_id = $${idx}`;
+  try{ await ensureSetupsSchema(); }catch(e){ return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
   try{ await db.query(sql, values); return res.json({ ok:true }); }catch(e){ console.error('patch failed', e); return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
 });
 
