@@ -214,11 +214,17 @@ app.post('/api/setups', async (req,res)=>{
   try{
     await db.query(
       `INSERT INTO setups (canonical_id, symbol, setup, status, origin, entry_ts, hit_history) VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (canonical_id) DO UPDATE SET setup = (EXCLUDED.setup || setups.setup), status = EXCLUDED.status, origin = EXCLUDED.origin, entry_ts = EXCLUDED.entry_ts, updated_at = now()`
+       ON CONFLICT (canonical_id) DO UPDATE SET
+         setup = EXCLUDED.setup,
+         status = EXCLUDED.status,
+         origin = EXCLUDED.origin,
+         entry_ts = EXCLUDED.entry_ts,
+         hit_history = EXCLUDED.hit_history,
+         updated_at = now()`
       ,[canonical_id, symbol, setup, status, origin, entry_ts, setup.hitHistory || []]
     );
     return res.json({ ok:true });
-  }catch(e){ console.error('upsert failed', e); return res.status(500).json({ error:'db error' }); }
+  }catch(e){ console.error('upsert failed', e); return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
 });
 
 app.patch('/api/setups/:canonical', async (req,res)=>{
@@ -231,15 +237,15 @@ app.patch('/api/setups/:canonical', async (req,res)=>{
   let idx = 1;
   if(body.status){ fields.push(`status = $${idx++}`); values.push(body.status); }
   const hitHistory = normalizeJsonField(body.hitHistory, []);
-  if(hitHistory !== undefined){ fields.push(`hit_history = $${idx++}::jsonb`); values.push(JSON.stringify(hitHistory)); }
+  if(hitHistory !== undefined){ fields.push(`hit_history = $${idx++}`); values.push(hitHistory); }
   const setupRaw = normalizeJsonField(body.setup, {});
   const setupObj = roundSetupPriceFields(applySymbolTpProfile(body.symbol || 'PAXGUSDT', setupRaw, canonical));
-  if(setupObj !== undefined){ fields.push(`setup = $${idx++}::jsonb`); values.push(JSON.stringify(setupObj)); }
+  if(setupObj !== undefined){ fields.push(`setup = $${idx++}`); values.push(setupObj); }
   if(body.entry_ts){ fields.push(`entry_ts = $${idx++}`); values.push(body.entry_ts); }
   if(fields.length===0) return res.status(400).json({ error:'nothing to update' });
   values.push(canonical);
   const sql = `UPDATE setups SET ${fields.join(',')}, updated_at = now() WHERE canonical_id = $${idx}`;
-  try{ await db.query(sql, values); return res.json({ ok:true }); }catch(e){ console.error('patch failed', e); return res.status(500).json({ error:'db error' }); }
+  try{ await db.query(sql, values); return res.json({ ok:true }); }catch(e){ console.error('patch failed', e); return res.status(500).json({ error:'db error', detail: e.message, code: e.code }); }
 });
 
 // Admin cleanup: delete setups for symbol patterns (protected by setupsAuth)
