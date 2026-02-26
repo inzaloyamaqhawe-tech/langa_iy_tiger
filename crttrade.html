@@ -298,6 +298,9 @@ const NOTIFY = {
   lastBySymbol: {},
   lastSignalBySymbol: {}
 };
+if(window.Notification && Notification.permission === 'granted'){
+  NOTIFY.enabled = true;
+}
 const NOTIFY_COOLDOWN_MS = 60 * 1000;
 const SIGNAL_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -340,8 +343,9 @@ function canNotify(symbol){
 }
 
 
-function notifyUser(symbol, title, body){
-  if(!NOTIFY.enabled) return;
+function notifyUser(symbol, title, body, options={}){
+  const force = !!(options && options.force);
+  if(!NOTIFY.enabled && !force) return;
   if(!canNotify(symbol)) return;
   if('Notification' in window && Notification.permission === 'granted'){
     try{ new Notification(title, { body }); }catch(e){ console.warn('Notification failed', e); }
@@ -1158,7 +1162,83 @@ async function applyCachedSignalIfValid(symbol){
 
 /* ========== Persistent setups (localStorage) ========== */
 const SETUP_STORAGE_KEY = 'crt_setups_v1';
+const SETUP_LIFECYCLE_KEY = 'crt_setup_lifecycle_v1';
 function loadSetups(){ try{ return JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || '[]'); }catch(e){ return []; } }
+
+function loadLifecycleMap(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(SETUP_LIFECYCLE_KEY) || '{}');
+    return raw && typeof raw === 'object' ? raw : {};
+  }catch(e){
+    return {};
+  }
+}
+
+function saveLifecycleMap(map){
+  try{ localStorage.setItem(SETUP_LIFECYCLE_KEY, JSON.stringify(map || {})); }catch(e){}
+}
+
+function hasRealTp1Hit(setup){
+  const hh = Array.isArray(setup && setup.hitHistory) ? setup.hitHistory : (Array.isArray(setup && setup.hit_history) ? setup.hit_history : []);
+  return hh.some(h => h && h.type && /^TP1$/i.test(String(h.type)));
+}
+
+function applySetupLifecycleRecovery(list){
+  if(!Array.isArray(list) || !list.length) return;
+  const lifecycle = loadLifecycleMap();
+  let changed = false;
+
+  for(const s of list){
+    if(!s) continue;
+    const id = getCanonicalId(s) || s.id;
+    if(!id) continue;
+
+    if(!lifecycle[id]) lifecycle[id] = { seenPending: false, notifiedSignal: false, notifiedRecovery: false, lastStatus: null };
+    const state = lifecycle[id];
+
+    const tp1Hit = hasRealTp1Hit(s);
+    const isPendingViewState = s.status === 'PENDING' || (s.status === 'SUCCESS' && !tp1Hit);
+
+    if(isPendingViewState && !state.seenPending){
+      state.seenPending = true;
+      changed = true;
+    }
+
+    // Signal catch-up: if setup is now active/pending on this device and user was never notified, notify once.
+    if(isPendingViewState && !state.notifiedSignal){
+      const side = (s.side || 'WAIT').toUpperCase();
+      const symbol = getLabelFor(s.symbol || 'PAXGUSDT');
+      const entry = Number(s.entry);
+      const sl = Number(s.sl);
+      const eTxt = Number.isFinite(entry) ? entry.toFixed(2) : '—';
+      const slTxt = Number.isFinite(sl) ? sl.toFixed(2) : '—';
+      notifyUser(s.symbol || 'PAXGUSDT', `SETUP ACTIVE (${side}) — ${symbol}`, `Recovered pending setup\nEntry: ${eTxt} | SL: ${slTxt}`, { force: true });
+      state.notifiedSignal = true;
+      changed = true;
+      console.log('[LIFECYCLE NOTIFY SIGNAL]', { id, status: s.status, side: s.side, symbol: s.symbol });
+    }
+
+    // Recovery catch-up: setup resolved before this device ever saw pending.
+    if((s.status === 'SUCCESS' || s.status === 'FAILED') && !state.seenPending && !state.notifiedRecovery){
+      const side = (s.side || 'WAIT').toUpperCase();
+      const symbol = getLabelFor(s.symbol || 'PAXGUSDT');
+      const outcome = s.status === 'SUCCESS' ? 'WON' : 'LOST (SL)';
+      notifyUser(s.symbol || 'PAXGUSDT', `SETUP RECOVERED (${outcome}) — ${symbol}`, `This setup resolved before pending was seen on this device.\nSide: ${side}`, { force: true });
+      state.notifiedRecovery = true;
+      state.notifiedSignal = true;
+      changed = true;
+      console.log('[LIFECYCLE NOTIFY RECOVERY]', { id, status: s.status, side: s.side, symbol: s.symbol });
+    }
+
+    if(state.lastStatus !== s.status){
+      state.lastStatus = s.status;
+      changed = true;
+    }
+  }
+
+  if(changed) saveLifecycleMap(lifecycle);
+}
+
 function normalizeSetupsArray(arr){
   const map = {};
   // status priority: SUCCESS > FAILED > PENDING
@@ -1508,10 +1588,6 @@ function importSetupsFile(file){
 }
 async function refreshSetupViews(){
   // Merge local + server so confirmed pending setups show immediately.
-  function hasRealTp1Hit(s){
-    const hh = Array.isArray(s.hitHistory) ? s.hitHistory : (Array.isArray(s.hit_history) ? s.hit_history : []);
-    return hh.some(h => h && h.type && /^TP1$/i.test(String(h.type)));
-  }
   const localList = loadSetups();
   let list = localList;
   try{
@@ -1524,6 +1600,11 @@ async function refreshSetupViews(){
       }
     }
   }catch(e){ /* fallback to local */ }
+
+  // Ensure this device gets a catch-up notification when setups appear without
+  // ever passing through local pending/notify flow.
+  applySetupLifecycleRecovery(list);
+
   // keep local in sync with merged server view so notification gating uses the same state users see
   saveSetups(list);
   const sortByLatest = (a,b)=>{
@@ -2139,7 +2220,7 @@ window.addEventListener('beforeunload', ()=>{
 // Request notification permission up front (user can grant)
 if(window.Notification && Notification.permission !== 'granted' && Notification.permission !== 'denied'){
   try{
-    Notification.requestPermission().then(p=>{ if(p==='granted') console.log('Notifications granted'); }).catch(e=>{ console.warn('Notification perm error', e); });
+    Notification.requestPermission().then(p=>{ if(p==='granted'){ NOTIFY.enabled = true; console.log('Notifications granted'); } }).catch(e=>{ console.warn('Notification perm error', e); });
   }catch(e){ console.warn('Notification request failed', e); }
 }
 
