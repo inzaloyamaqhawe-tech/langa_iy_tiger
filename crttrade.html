@@ -1358,15 +1358,17 @@ async function syncFromServer(){
     const local = loadSetups();
     saveSetups([...(local || []), ...(server || [])]);
     refreshSetupViews();
+    return { ok:true, serverCount: server.length };
   }catch(e){
     console.warn('sync from server failed', e);
     // fallback: keep local JSON as backup
     refreshSetupViews();
+    return { ok:false, serverCount: 0, error: e };
   }
 }
 
 // Push any local-only setups to DB so all users/devices see the same records.
-async function reconcileLocalMissingSetupsToServer(){
+async function reconcileLocalMissingSetupsToServer(onProgress){
   const local = loadSetups();
   if(!Array.isArray(local) || !local.length) return { pushed: 0, missing: 0, total: 0, ok: true };
 
@@ -1387,6 +1389,7 @@ async function reconcileLocalMissingSetupsToServer(){
   });
 
   let pushed = 0;
+  if(typeof onProgress === 'function') onProgress(0, missing.length);
   for(const setup of missing){
     const canonicalId = getCanonicalId(setup) || setup.id;
     if(!canonicalId) continue;
@@ -1396,9 +1399,25 @@ async function reconcileLocalMissingSetupsToServer(){
       pushed++;
       console.log('[RECONCILE PUSH OK]', { id: canonicalId, symbol: normalized.symbol, status: normalized.status });
     }
+    if(typeof onProgress === 'function') onProgress(pushed, missing.length);
   }
 
   return { pushed, missing: missing.length, total: local.length, ok: true };
+}
+
+async function runCrossDeviceSyncCycle(source='manual'){
+  console.log('*scanning local setups...');
+  const localCount = loadSetups().length;
+  console.log('* scanning server settups...');
+  const pullRes = await syncFromServer();
+  const serverCount = Number(pullRes && pullRes.serverCount) || 0;
+  const reconRes = await reconcileLocalMissingSetupsToServer((done, total)=>{
+    console.log(`*syncing local setups...${done}/${total}..`);
+  });
+  await refreshSetupViews();
+  console.log('*sync successful...');
+  console.log('[SYNC SUMMARY]', { source, localCount, serverCount, pushed: reconRes.pushed, missing: reconRes.missing });
+  return { pullRes, reconRes, localCount, serverCount };
 }
 function updateSetupStatus(id, status, reason, resolvedAt){
   const list = loadSetups(); const idx = list.findIndex(s=>s.id===id); if(idx===-1) return; list[idx].status = status; if(reason) list[idx].reason = reason; list[idx].resolvedAt = resolvedAt||Date.now(); saveSetups(list);
@@ -1804,8 +1823,7 @@ repairWrongfullySuccessfulSetups().finally(()=>{
   refreshSetupViews();
 });
 // attempt to sync from central DB (non-destructive merge)
-try{ syncFromServer(); }catch(e){ /* ignore errors */ }
-try{ reconcileLocalMissingSetupsToServer(); }catch(e){ /* ignore errors */ }
+try{ runCrossDeviceSyncCycle('startup'); }catch(e){ /* ignore errors */ }
 
 function isSignalTooLate(currentPrice, tp1, tp2, side){
   if(!currentPrice || !tp1 || !tp2) return false;
@@ -1991,10 +2009,8 @@ document.getElementById('pushPending').addEventListener('click', async ()=>{
   const original = btn ? btn.innerText : 'Sync';
   try{
     if(btn){ btn.innerText = 'Syncing...'; btn.disabled = true; }
-    const pull = syncFromServer();
-    const push = reconcileLocalMissingSetupsToServer();
-    const [_, pushRes] = await Promise.all([pull, push]);
-    await refreshSetupViews();
+    const out = await runCrossDeviceSyncCycle('manual');
+    const pushRes = out.reconRes || { pushed:0, missing:0 };
     const pushed = Number(pushRes && pushRes.pushed) || 0;
     const missing = Number(pushRes && pushRes.missing) || 0;
     alert(`Sync complete. Pushed ${pushed} of ${missing} missing local setup(s) to database.`);
@@ -2219,12 +2235,7 @@ startBackgroundScanner();
 // Scheduled cross-device setup reconciliation (every 7 minutes)
 async function runScheduledSetupSync(){
   try{
-    await syncFromServer();
-    const res = await reconcileLocalMissingSetupsToServer();
-    await refreshSetupViews();
-    if(res && Number(res.missing) > 0){
-      console.log(`Scheduled setup sync: pushed ${res.pushed}/${res.missing} missing local setup(s)`);
-    }
+    await runCrossDeviceSyncCycle('refresh');
   }catch(e){
     console.warn('Scheduled setup sync failed', e);
   }
