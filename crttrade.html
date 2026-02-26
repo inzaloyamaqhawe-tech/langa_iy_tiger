@@ -1361,6 +1361,39 @@ async function syncFromServer(){
     refreshSetupViews();
   }
 }
+
+// Push any local-only setups to DB so all users/devices see the same records.
+async function reconcileLocalMissingSetupsToServer(){
+  const local = loadSetups();
+  if(!Array.isArray(local) || !local.length) return { pushed: 0, missing: 0, total: 0, ok: true };
+
+  let serverRows = [];
+  try{
+    const r = await fetch('/api/setups');
+    if(!r.ok) return { pushed: 0, missing: local.length, total: local.length, ok: false, reason: `server ${r.status}` };
+    const j = await r.json();
+    serverRows = (j && Array.isArray(j.setups)) ? j.setups : [];
+  }catch(e){
+    return { pushed: 0, missing: local.length, total: local.length, ok: false, reason: 'server unavailable' };
+  }
+
+  const serverIds = new Set(serverRows.map(row => row && row.canonical_id).filter(Boolean));
+  const missing = local.filter(s => {
+    const id = getCanonicalId(s) || s.id;
+    return id && !serverIds.has(id);
+  });
+
+  let pushed = 0;
+  for(const setup of missing){
+    const canonicalId = getCanonicalId(setup) || setup.id;
+    if(!canonicalId) continue;
+    const normalized = roundSetupPrices({ ...setup, id: canonicalId });
+    const posted = await ensureSetupPostedForDevices(normalized);
+    if(posted) pushed++;
+  }
+
+  return { pushed, missing: missing.length, total: local.length, ok: true };
+}
 function updateSetupStatus(id, status, reason, resolvedAt){
   const list = loadSetups(); const idx = list.findIndex(s=>s.id===id); if(idx===-1) return; list[idx].status = status; if(reason) list[idx].reason = reason; list[idx].resolvedAt = resolvedAt||Date.now(); saveSetups(list);
 }
@@ -1390,6 +1423,7 @@ function importSetupsFile(file){
       const merged = Object.keys(mergedMap).map(k=>mergedMap[k]);
       saveSetups(merged);
       alert(`Imported setups (merged, deduped). Total: ${merged.length}`);
+      reconcileLocalMissingSetupsToServer().catch(e=>console.warn('reconcile after import failed', e));
       refreshSetupViews();
     }catch(err){ alert('Invalid JSON file'); }
   };
@@ -1765,6 +1799,7 @@ repairWrongfullySuccessfulSetups().finally(()=>{
 });
 // attempt to sync from central DB (non-destructive merge)
 try{ syncFromServer(); }catch(e){ /* ignore errors */ }
+try{ reconcileLocalMissingSetupsToServer(); }catch(e){ /* ignore errors */ }
 
 function isSignalTooLate(currentPrice, tp1, tp2, side){
   if(!currentPrice || !tp1 || !tp2) return false;
@@ -1945,6 +1980,25 @@ applyKeysBtn.addEventListener('click', ()=> {
 // Sidebar and import/export wiring
 document.getElementById('exportJson').addEventListener('click', exportSetups);
 document.getElementById('importFile').addEventListener('change', (e)=>{ if(e.target.files && e.target.files[0]) importSetupsFile(e.target.files[0]); });
+document.getElementById('pushPending').addEventListener('click', async ()=>{
+  const btn = document.getElementById('pushPending');
+  const original = btn ? btn.innerText : 'Sync';
+  try{
+    if(btn){ btn.innerText = 'Syncing...'; btn.disabled = true; }
+    const pull = syncFromServer();
+    const push = reconcileLocalMissingSetupsToServer();
+    const [_, pushRes] = await Promise.all([pull, push]);
+    await refreshSetupViews();
+    const pushed = Number(pushRes && pushRes.pushed) || 0;
+    const missing = Number(pushRes && pushRes.missing) || 0;
+    alert(`Sync complete. Pushed ${pushed} of ${missing} missing local setup(s) to database.`);
+  }catch(e){
+    console.warn('manual sync failed', e);
+    alert('Sync failed. Check server/database connection.');
+  }finally{
+    if(btn){ btn.innerText = original; btn.disabled = false; }
+  }
+});
   function showView(id){
     // hide all
     ['viewDashboard','viewCRT','viewPending','viewSuccess','viewFail'].forEach(v=>{ const el = document.getElementById(v); if(el) el.style.display = 'none'; });
@@ -2156,6 +2210,21 @@ function startBackgroundScanner(){
 }
 
 startBackgroundScanner();
+// Scheduled cross-device setup reconciliation (every 7 minutes)
+async function runScheduledSetupSync(){
+  try{
+    await syncFromServer();
+    const res = await reconcileLocalMissingSetupsToServer();
+    await refreshSetupViews();
+    if(res && Number(res.missing) > 0){
+      console.log(`Scheduled setup sync: pushed ${res.pushed}/${res.missing} missing local setup(s)`);
+    }
+  }catch(e){
+    console.warn('Scheduled setup sync failed', e);
+  }
+}
+runScheduledSetupSync();
+setInterval(runScheduledSetupSync, 7 * 60 * 1000);
 // Auto-refresh routine: every 15 minutes, sync from server and refresh UI.
 // This performs a soft refresh (sync + re-render); after 3 consecutive failures
 // it falls back to a full page reload.
