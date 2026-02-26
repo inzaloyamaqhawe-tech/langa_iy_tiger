@@ -1264,7 +1264,10 @@ async function ensureSetupPostedForDevices(s){
   if(!s || !s.id) return false;
   try{
     const r = await pushSetupToServer(s);
-    if(r && r.ok) return true;
+    if(r && r.ok){
+      console.log('[SETUP PUSH OK]', { id: s.id, symbol: s.symbol, side: s.side, entry: s.entry, status: s.status });
+      return true;
+    }
     console.warn('ensureSetupPostedForDevices failed', r && r.status);
     return await setupExistsOnServer(s.id);
   }catch(e){
@@ -1389,7 +1392,10 @@ async function reconcileLocalMissingSetupsToServer(){
     if(!canonicalId) continue;
     const normalized = roundSetupPrices({ ...setup, id: canonicalId });
     const posted = await ensureSetupPostedForDevices(normalized);
-    if(posted) pushed++;
+    if(posted){
+      pushed++;
+      console.log('[RECONCILE PUSH OK]', { id: canonicalId, symbol: normalized.symbol, status: normalized.status });
+    }
   }
 
   return { pushed, missing: missing.length, total: local.length, ok: true };
