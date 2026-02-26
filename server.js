@@ -1,4 +1,5 @@
 // Unified LLM backend proxy
+// Supports provider: gemini | openai | github (stub)
 // IMPORTANT: GitHub Copilot models are NOT publicly exposed via a simple REST API.
 // The 'github' provider here is a placeholder returning 501 until you wire an actual endpoint.
 // Keep this server private; never expose raw API keys client-side.
@@ -41,6 +42,18 @@ function roundSetupPriceFields(setup){
     if(Number.isFinite(n)) out[key] = Number(n.toFixed(2));
   }
   return out;
+}
+
+function normalizeEntryTs(value){
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function normalizeHitHistory(value){
+  if(Array.isArray(value)) return value;
+  if(value && typeof value === 'object') return value;
+  const parsed = normalizeJsonField(value, []);
+  return parsed === undefined || parsed === null ? [] : parsed;
 }
 
 function applySymbolTpProfile(sym, setup, cid){
@@ -236,7 +249,7 @@ app.post('/api/setups', async (req,res)=>{
   const setup = payload.setup || payload;
   const status = payload.status || setup.status || 'PENDING';
   const origin = payload.origin || setup.origin || null;
-  const entry_ts = payload.entry_ts || setup.entryTs || null;
+  const entry_ts = normalizeEntryTs(payload.entry_ts ?? setup.entryTs ?? null);
   if(!canonical_id || !symbol) return res.status(400).json({ error:'canonical_id and symbol required' });
   // Enforce whitelist: only allow PAXGUSDT setups going forward
   if(String(symbol).toUpperCase() !== 'PAXGUSDT'){
@@ -249,17 +262,18 @@ app.post('/api/setups', async (req,res)=>{
   }catch(e){ console.error('normalize error', e); }
   try{
     await ensureSetupsSchema();
-    const values = [canonical_id, symbol, setup, status, origin, entry_ts, setup.hitHistory || []];
+    const hitHistory = normalizeHitHistory(payload.hitHistory ?? setup.hitHistory ?? setup.hit_history ?? []);
+    const values = [canonical_id, symbol, setup, status, origin, entry_ts, JSON.stringify(hitHistory)];
     const upd = await db.query(
       `UPDATE setups
-       SET symbol = $2, setup = $3, status = $4, origin = $5, entry_ts = $6, hit_history = $7, updated_at = now()
+       SET symbol = $2, setup = $3, status = $4, origin = $5, entry_ts = $6, hit_history = $7::jsonb, updated_at = now()
        WHERE canonical_id = $1`,
       values
     );
     if((upd.rowCount || 0) === 0){
       await db.query(
         `INSERT INTO setups (canonical_id, symbol, setup, status, origin, entry_ts, hit_history, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7, now(), now())`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb, now(), now())`,
         values
       );
     }
@@ -277,11 +291,11 @@ app.patch('/api/setups/:canonical', async (req,res)=>{
   let idx = 1;
   if(body.status){ fields.push(`status = $${idx++}`); values.push(body.status); }
   const hitHistory = normalizeJsonField(body.hitHistory, []);
-  if(hitHistory !== undefined){ fields.push(`hit_history = $${idx++}`); values.push(hitHistory); }
+  if(hitHistory !== undefined){ fields.push(`hit_history = $${idx++}::jsonb`); values.push(JSON.stringify(normalizeHitHistory(hitHistory))); }
   const setupRaw = normalizeJsonField(body.setup, {});
   const setupObj = roundSetupPriceFields(applySymbolTpProfile(body.symbol || 'PAXGUSDT', setupRaw, canonical));
   if(setupObj !== undefined){ fields.push(`setup = $${idx++}`); values.push(setupObj); }
-  if(body.entry_ts){ fields.push(`entry_ts = $${idx++}`); values.push(body.entry_ts); }
+  if(body.entry_ts){ fields.push(`entry_ts = $${idx++}`); values.push(normalizeEntryTs(body.entry_ts)); }
   if(fields.length===0) return res.status(400).json({ error:'nothing to update' });
   values.push(canonical);
   const sql = `UPDATE setups SET ${fields.join(',')}, updated_at = now() WHERE canonical_id = $${idx}`;
