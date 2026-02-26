@@ -1336,26 +1336,47 @@ async function tryAutoPost(s){
 }
 
 // Pull setups from server and merge into local storage (non-destructive). Keeps import/export modal.
+function normalizeSymbolAlias(sym){
+  const up = String(sym || '').toUpperCase();
+  if(up === 'PAXGUSD' || up === 'PAXGUSDT') return 'PAXGUSDT';
+  return up || sym;
+}
+
+function extractSetupSyncKey(s){
+  if(!s) return null;
+  if(s.ref && s.ref.t) return `PAXGUSDT|${s.ref.t}`;
+  if(s.h1_ts) return `PAXGUSDT|${s.h1_ts}`;
+  const id = String(s.id || getCanonicalId(s) || '');
+  if(!id) return null;
+  if(id.includes('|')) return `PAXGUSDT|${id.split('|').pop()}`;
+  return id;
+}
+
+function toClientSetupFromServerRow(row){
+  const s = row && row.setup ? { ...row.setup } : {};
+  const setupHistory = Array.isArray(s.hitHistory) ? s.hitHistory : (Array.isArray(s.hit_history) ? s.hit_history : []);
+  const rowHistory = Array.isArray(row && row.hit_history) ? row.hit_history : [];
+  const bestHistory = rowHistory.length ? rowHistory : setupHistory;
+  s.id = (row && row.canonical_id) || s.id;
+  s.symbol = normalizeSymbolAlias(s.symbol || (row && row.symbol));
+  s.status = (row && row.status) || s.status || 'PENDING';
+  s.origin = s.origin || (row && row.origin);
+  s.entryTs = s.entryTs || (row && row.entry_ts);
+  s.hitHistory = bestHistory;
+  s.recordedTs = s.recordedTs || ((row && row.created_at) ? new Date(row.created_at).getTime() : Date.now());
+  return s;
+}
+
 async function syncFromServer(){
   try{
     const r = await fetch('/api/setups');
     if(!r.ok) throw new Error('server not available');
     const j = await r.json();
     if(!j || !Array.isArray(j.setups)) throw new Error('invalid server response');
-    const server = j.setups.map(row=>{
-      const s = row.setup || {};
-      s.id = row.canonical_id || s.id;
-      s.symbol = s.symbol || row.symbol;
-      s.status = row.status || s.status || 'PENDING';
-      s.origin = s.origin || row.origin;
-      s.entryTs = s.entryTs || row.entry_ts;
-      s.hitHistory = s.hitHistory || row.hit_history || [];
-      s.recordedTs = s.recordedTs || (row.created_at ? new Date(row.created_at).getTime() : Date.now());
-      return s;
-    });
+    const server = j.setups.map(toClientSetupFromServerRow);
     // Merge server + local non-destructively so freshly confirmed local pending setups
     // are not hidden if server returns stale/empty results.
-    const local = loadSetups();
+    const local = loadSetups().map(x => ({ ...x, symbol: normalizeSymbolAlias(x.symbol) }));
     saveSetups([...(local || []), ...(server || [])]);
     refreshSetupViews();
     return { ok:true, serverCount: server.length };
@@ -1369,7 +1390,7 @@ async function syncFromServer(){
 
 // Push any local-only setups to DB so all users/devices see the same records.
 async function reconcileLocalMissingSetupsToServer(onProgress){
-  const local = loadSetups();
+  const local = normalizeSetupsArray(loadSetups().map(x => ({ ...x, symbol: normalizeSymbolAlias(x.symbol) })));
   if(!Array.isArray(local) || !local.length) return { pushed: 0, missing: 0, total: 0, ok: true };
 
   let serverRows = [];
@@ -1382,11 +1403,16 @@ async function reconcileLocalMissingSetupsToServer(onProgress){
     return { pushed: 0, missing: local.length, total: local.length, ok: false, reason: 'server unavailable' };
   }
 
+  const serverList = serverRows.map(toClientSetupFromServerRow);
   const serverIds = new Set(serverRows.map(row => row && row.canonical_id).filter(Boolean));
+  const serverKeys = new Set(serverList.map(extractSetupSyncKey).filter(Boolean));
   const missing = local.filter(s => {
     const id = getCanonicalId(s) || s.id;
-    return id && !serverIds.has(id);
+    const key = extractSetupSyncKey(s);
+    return (id && !serverIds.has(id)) && (key && !serverKeys.has(key));
   });
+
+  console.log('[SYNC COUNT CHECK]', { localCount: local.length, serverCount: serverList.length, extrasToPush: missing.length });
 
   let pushed = 0;
   if(typeof onProgress === 'function') onProgress(0, missing.length);
@@ -1402,7 +1428,16 @@ async function reconcileLocalMissingSetupsToServer(onProgress){
     if(typeof onProgress === 'function') onProgress(pushed, missing.length);
   }
 
-  return { pushed, missing: missing.length, total: local.length, ok: true };
+  let serverCountAfter = serverList.length;
+  try{
+    const rr = await fetch('/api/setups');
+    if(rr.ok){
+      const jj = await rr.json();
+      if(jj && Array.isArray(jj.setups)) serverCountAfter = jj.setups.length;
+    }
+  }catch(e){ /* ignore */ }
+
+  return { pushed, missing: missing.length, total: local.length, ok: true, serverCountBefore: serverList.length, serverCountAfter };
 }
 
 async function runCrossDeviceSyncCycle(source='manual'){
@@ -1416,7 +1451,7 @@ async function runCrossDeviceSyncCycle(source='manual'){
   });
   await refreshSetupViews();
   console.log('*sync successful...');
-  console.log('[SYNC SUMMARY]', { source, localCount, serverCount, pushed: reconRes.pushed, missing: reconRes.missing });
+  console.log('[SYNC SUMMARY]', { source, localCount, serverCount, pushed: reconRes.pushed, missing: reconRes.missing, serverCountAfter: reconRes.serverCountAfter });
   return { pullRes, reconRes, localCount, serverCount };
 }
 function updateSetupStatus(id, status, reason, resolvedAt){
