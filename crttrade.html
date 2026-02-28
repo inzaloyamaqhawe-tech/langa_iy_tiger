@@ -1914,19 +1914,73 @@ async function refreshSetupViews(){
 
 let LAST_RENDERED_SETUPS = [];
 
+function toLearnerText(text){
+  const raw = String(text || '').trim();
+  if(!raw) return '';
+  return raw
+    .replace(/\bHTF\b/gi, 'higher timeframe')
+    .replace(/\bLTF\b/gi, 'lower timeframe')
+    .replace(/\bMSS\b/gi, 'market shift confirmation')
+    .replace(/\bFVG\b/gi, 'value gap area')
+    .replace(/\bOB\b/gi, 'order block area')
+    .replace(/\bCRT\b/gi, 'CRT setup')
+    .replace(/\s*\+\s*/g, ' and ')
+    .replace(/\s*→\s*/g, ' to ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatH1Window(ts){
+  const n = Number(ts);
+  if(!Number.isFinite(n) || n <= 0) return null;
+  const start = new Date(n);
+  const end = new Date(n + 60 * 60 * 1000);
+  const fmt = (d)=> d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', hour12:false });
+  return `${fmt(start)}-${fmt(end)}`;
+}
+
+function getLtfConfirmationTypeText(ltfReason){
+  const raw = String(ltfReason || '').toUpperCase();
+  const hasFvg = /\bFVG\b|VALUE GAP/.test(raw);
+  const hasOb = /\bOB\b|ORDER BLOCK/.test(raw);
+  const hasMss = /\bMSS\b|MARKET SHIFT|CHOCH/.test(raw);
+  if(hasFvg && hasOb) return 'FVG/OB';
+  if(hasFvg) return 'FVG';
+  if(hasOb) return 'OB';
+  if(hasMss) return 'MSS';
+  return 'LTF confirmation';
+}
+
 function buildSetupReasonHtml(s){
   if(!s) return 'No setup details available.';
   const side = String(s.side || '').toUpperCase();
   const heading = side === 'SELL' ? 'REASON SELL:' : 'REASON BUY:';
   const setupType = String(s.setupType || 'UNKNOWN').toUpperCase();
-  const htfReason = s.htfReason || s.reason || 'HTF CRT range/sweep decision confirmed.';
-  const ltfReason = s.ltfReason || 'LTF alignment confirmed by sweep-close-back-inside with MSS/zone support.';
-  const validationReason = s.validationReason || 'Setup passed HTF + LTF validation and was posted as VALID.';
-  return `${heading}<br/><br/>`+
-    `<strong>HTF Detection:</strong> ${htfReason}<br/>`+
-    `<strong>Setup Type:</strong> ${setupType}<br/>`+
-    `<strong>LTF Alignment:</strong> ${ltfReason}<br/>`+
-    `<strong>Validation:</strong> ${validationReason}`;
+  const htfReason = toLearnerText(s.htfReason || s.reason || 'The higher timeframe CRT was marked clearly and gave direction.');
+  const ltfReasonRaw = String(s.ltfReason || '');
+  const ltfReason = toLearnerText(ltfReasonRaw || 'The lower timeframe aligned and confirmed the same direction.');
+  const validationReason = toLearnerText(s.validationReason || 'Both timeframes agreed, so the setup was validated and posted as valid.');
+  const refTs = (s.ref && s.ref.t) || s.h1_ts || null;
+  const c1Window = formatH1Window(refTs) || 'focus H1 candle';
+  const c2Window = formatH1Window(Number(refTs) + 60 * 60 * 1000) || 'next H1 candle';
+  const ltfType = getLtfConfirmationTypeText(ltfReasonRaw);
+
+  const isBuy = side !== 'SELL';
+  const trendText = setupType === 'REVERSAL'
+    ? (isBuy ? 'after a bearish trend in the 1H timeframe' : 'after a bullish trend in the 1H timeframe')
+    : (isBuy ? 'inside a bullish continuation context in the 1H timeframe' : 'inside a bearish continuation context in the 1H timeframe');
+  const focusCandleText = isBuy ? 'strong bearish focus candle' : 'strong bullish focus candle';
+  const sweepText = isBuy ? 'its liquidity was swept below its low' : 'its liquidity was swept above its high';
+  const rejectionText = `${c2Window} rejection candle closed back into the focus-candle range`;
+  const ltfMomentumText = isBuy
+    ? `the ${ltfType} confirmation on the 5M timeframe supported bullish momentum after the sweep`
+    : `the ${ltfType} confirmation on the 5M timeframe supported bearish momentum after the sweep`;
+  const objectiveText = setupType === 'REVERSAL'
+    ? (isBuy ? 'aiming a reversal of gold price toward buy-side liquidity' : 'aiming a reversal of gold price toward sell-side liquidity')
+    : (isBuy ? 'aiming continuation toward buy-side liquidity' : 'aiming continuation toward sell-side liquidity');
+
+  const paragraph = `This ${isBuy ? 'buy' : 'sell'} setup was posted because ${trendText}, then the ${c1Window} ${focusCandleText} formed and ${sweepText}. The ${rejectionText}. After that, ${ltfMomentumText}, so the setup was validated as ${setupType === 'UNKNOWN' ? 'valid' : setupType.toLowerCase()} and posted, ${objectiveText}. Higher timeframe detection here means CRT marking on HTF, not any take-profit hit. ${htfReason} ${ltfReason} ${validationReason}`;
+  return `${heading}<br/><br/>${paragraph}`;
 }
 
 function openSetupReasonModalById(encodedId){
