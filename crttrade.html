@@ -240,11 +240,11 @@
             <div>
               <label class="small">Cashout TP</label>
               <select id="tpChoice" class="select mt-2">
-                <option value="500">TP1 = 500 points</option>
-                <option value="1000">TP2 = 1000 points</option>
-                <option value="1500">TP3 = 1500 points</option>
-                <option value="2000">TP4 = 2000 points</option>
-                <option value="3000">TP5 = 3000 points</option>
+                <option value="500">TP1</option>
+                <option value="1000">TP2</option>
+                <option value="1500">TP3</option>
+                <option value="2000">TP4</option>
+                <option value="3000">TP5</option>
               </select>
             </div>
             <div class="flex items-end">
@@ -2251,13 +2251,17 @@ const lotSizeInput = document.getElementById('lotSizeInput');
 const tpChoice = document.getElementById('tpChoice');
 const calcProfitBtn = document.getElementById('calcProfitBtn');
 const profitResult = document.getElementById('profitResult');
-function calculateProfitLive(clampInput=false){
+function calculateProfitLive(){
   const MIN_LOT = 0.01;
   const MAX_LOT = 100;
 
   const rawLot = Number(lotSizeInput && lotSizeInput.value);
   if(!Number.isFinite(rawLot) || rawLot < MIN_LOT){
     if(profitResult) profitResult.innerText = 'Profit: Enter a valid lot size (0.01 to 100).';
+    return;
+  }
+  if(rawLot > MAX_LOT){
+    if(profitResult) profitResult.innerText = 'Profit: Max limit exceeded.';
     return;
   }
 
@@ -2267,21 +2271,19 @@ function calculateProfitLive(clampInput=false){
     return;
   }
 
-  const lotSize = Math.min(MAX_LOT, rawLot);
-  if(clampInput && lotSizeInput) lotSizeInput.value = lotSize.toString();
-
+  const lotSize = rawLot;
   const profit = lotSize * points;
-  if(profitResult) profitResult.innerText = `Profit: ${profit.toFixed(2)} (Lot size ${lotSize} × ${points} points)`;
+  if(profitResult) profitResult.innerText = `Profit: ${profit.toFixed(2)}`;
 }
 
 if(calcProfitBtn){
-  calcProfitBtn.addEventListener('click', ()=> calculateProfitLive(true));
+  calcProfitBtn.addEventListener('click', ()=> calculateProfitLive());
 }
 if(lotSizeInput){
-  lotSizeInput.addEventListener('input', ()=> calculateProfitLive(false));
+  lotSizeInput.addEventListener('input', ()=> calculateProfitLive());
 }
 if(tpChoice){
-  tpChoice.addEventListener('change', ()=> calculateProfitLive(false));
+  tpChoice.addEventListener('change', ()=> calculateProfitLive());
 }
 
 async function onSymbolChange(){
