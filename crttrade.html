@@ -807,7 +807,53 @@ function getClosed(data){
   return (data || []).filter(c=>c.closed !== false);
 }
 
-function analyzeCRTWithData(data){
+function getStrictH1CrtOptions(){
+  return {
+    maxC2AgeMs: 2 * 60 * 60 * 1000,
+    maxC1AgeMs: 3 * 60 * 60 * 1000,
+    requireLatestPair: true,
+    staleReason: 'H1 setup expired; waiting for latest C1/C2.'
+  };
+}
+
+function inferIntervalMsFromData(data, fallbackMs = 60 * 60 * 1000){
+  if(!Array.isArray(data) || data.length < 2) return fallbackMs;
+  const tail = data.slice(-12).map(c => Number(c && c.t)).filter(Number.isFinite).sort((a,b)=>a-b);
+  if(tail.length < 2) return fallbackMs;
+  const diffs = [];
+  for(let i=1;i<tail.length;i++){
+    const d = tail[i] - tail[i-1];
+    if(d > 0) diffs.push(d);
+  }
+  if(!diffs.length) return fallbackMs;
+  diffs.sort((a,b)=>a-b);
+  return diffs[Math.floor(diffs.length/2)] || fallbackMs;
+}
+
+function getRunnerStartFromData(data, intervalMs){
+  if(Array.isArray(data) && data.length){
+    for(let i=data.length-1; i>=0; i--){
+      const c = data[i];
+      if(c && c.closed === false && Number.isFinite(Number(c.t))) return Number(c.t);
+    }
+  }
+  const iv = Number(intervalMs) || (60 * 60 * 1000);
+  return Math.floor(Date.now() / iv) * iv;
+}
+
+function isLatestPairFromRunner(c1Ts, c2Ts, runnerStartTs, intervalMs){
+  const iv = Number(intervalMs) || (60 * 60 * 1000);
+  const runner = Number(runnerStartTs);
+  if(!Number.isFinite(runner) || !Number.isFinite(c1Ts) || !Number.isFinite(c2Ts)) return false;
+  const expectedC2 = runner - iv;
+  const expectedC1 = runner - (2 * iv);
+  return Number(c1Ts) === expectedC1 && Number(c2Ts) === expectedC2;
+}
+
+function analyzeCRTWithData(data, opts={}){
+  const raw = Array.isArray(data) ? data : [];
+  const intervalMs = Number(opts.intervalMs) || inferIntervalMsFromData(raw, 60 * 60 * 1000);
+  const runnerStartTs = Number(opts.runnerStartTs) || getRunnerStartFromData(raw, intervalMs);
   const closed = getClosed(data);
   if(closed.length < 3){
     return {status:'WAITING', side:'—', reason:'Not enough closed candles', details:[]};
@@ -816,10 +862,19 @@ function analyzeCRTWithData(data){
   const c2 = closed[closed.length-1];
   const c1Index = closed.length - 2;
   const c2Index = closed.length - 1;
-  // age check: ignore HTF reference older than configured hours
-  const HTF_MAX_AGE_HOURS = 24;
-  if(Date.now() - c1.t > HTF_MAX_AGE_HOURS * 3600 * 1000){
-    return {status:'INVALID CRT', side:'—', reason:'H1 reference candle too old', details:[]};
+  const nowTs = Date.now();
+  const maxC1AgeMs = Number(opts.maxC1AgeMs);
+  const maxC2AgeMs = Number(opts.maxC2AgeMs);
+  const requireLatestPair = !!opts.requireLatestPair;
+  const staleReason = String(opts.staleReason || 'Setup expired; waiting for latest candles.');
+  if(requireLatestPair && !isLatestPairFromRunner(c1.t, c2.t, runnerStartTs, intervalMs)){
+    return {status:'INVALID CRT', side:'—', reason:staleReason, details:[]};
+  }
+  if(Number.isFinite(maxC1AgeMs) && (nowTs - c1.t) >= maxC1AgeMs){
+    return {status:'INVALID CRT', side:'—', reason:staleReason, details:[]};
+  }
+  if(Number.isFinite(maxC2AgeMs) && (nowTs - c2.t) >= maxC2AgeMs){
+    return {status:'INVALID CRT', side:'—', reason:staleReason, details:[]};
   }
 
   // Relaxed CRT scoring: evaluate multiple checks and require a minimum
@@ -948,16 +1003,35 @@ function getLiquidityTarget(h1Data, side, lookback=50){
   return null;
 }
 
+function getCrtC3Window(h1Signal){
+  if(!h1Signal || !h1Signal.manip || !Number.isFinite(Number(h1Signal.manip.t))) return null;
+  const c2Start = Number(h1Signal.manip.t);
+  const h1Ms = 60 * 60 * 1000;
+  const c2Close = c2Start + h1Ms;
+  const c3Close = c2Start + (2 * h1Ms);
+  return { c2Start, c2Close, c3Close };
+}
+
 function confirmM5WithH1(m5Data, h1Signal){
   const closed = getClosed(m5Data);
   if(closed.length < 50) return {ok:false, reason:'Insufficient M5 data'};
   if(!h1Signal || h1Signal.status !== 'VALID CRT SETUP' || !h1Signal.range) return {ok:false, reason:'No valid H1 setup'};
 
+  const window = getCrtC3Window(h1Signal);
+  if(window && Date.now() >= window.c3Close){
+    return {ok:false, reason:'CRT expired: C3 closed before confirmation.'};
+  }
+
   const range = h1Signal.range;
   const lookback = 20;
+  const evalClosed = window
+    ? closed.filter(c => c.t >= window.c2Close && c.t < window.c3Close)
+    : closed;
+  if(window && !evalClosed.length) return {ok:false, reason:'Waiting for M5 confirmation inside C3 window.'};
+
   let sweepCandle = null;
-  for(let i = closed.length - 1; i >= Math.max(0, closed.length - lookback); i--){
-    const c = closed[i];
+  for(let i = evalClosed.length - 1; i >= Math.max(0, evalClosed.length - lookback); i--){
+    const c = evalClosed[i];
     const sweepHigh = c.h > range.high;
     const sweepLow = c.l < range.low;
     const closeInside = c.c < range.high && c.c > range.low;
@@ -966,20 +1040,20 @@ function confirmM5WithH1(m5Data, h1Signal){
   }
 
   if(!sweepCandle){
-    return {ok:false, reason:'M5 needs sweep + close back inside range.'};
+    return {ok:false, reason:'M5 needs sweep + close back inside range during C3.'};
   }
 
-  const fvg = detectFVG(closed);
-  const ob = detectOB(closed, h1Signal.side);
+  const fvg = detectFVG(evalClosed);
+  const ob = detectOB(evalClosed, h1Signal.side);
   const zone = fvg.zone || ob;
   if(!zone){
-    return {ok:false, reason:'Waiting for OB/FVG zone after M5 sweep.'};
+    return {ok:false, reason:'Waiting for OB/FVG zone after M5 sweep during C3.'};
   }
 
-  const last = closed[closed.length-1];
+  const last = evalClosed[evalClosed.length-1];
   const intersects = last.l <= zone.high && last.h >= zone.low;
   if(!intersects){
-    return {ok:false, reason:'Waiting for OB/FVG retest on M5.'};
+    return {ok:false, reason:'Waiting for OB/FVG retest on M5 during C3.'};
   }
 
   const entry = (zone.low + zone.high) / 2;
@@ -1276,7 +1350,7 @@ async function updateLiveAndCRT(force=false){
     return;
   }
 
-  const h1Crt = analyzeCRTWithData(RUNTIME.historyH1);
+  const h1Crt = analyzeCRTWithData(RUNTIME.historyH1, getStrictH1CrtOptions());
   let m5Confirm = (h1Crt.status === 'VALID CRT SETUP')
     ? confirmM5WithH1(RUNTIME.historyM5, h1Crt)
     : {ok:false, reason:'Waiting for H1 setup.'};
@@ -1312,7 +1386,7 @@ async function applyCachedSignalIfValid(symbol){
   const m5 = await fetchHistorical(symbol, '5m', 600);
   if(!h1 || !m5){ clearCachedSignal(symbol); return; }
 
-  const h1Crt = analyzeCRTWithData(h1);
+  const h1Crt = analyzeCRTWithData(h1, getStrictH1CrtOptions());
   const m5Confirm = (h1Crt.status === 'VALID CRT SETUP')
     ? confirmM5WithH1(m5, h1Crt)
     : {ok:false};
@@ -1464,6 +1538,10 @@ function normalizeSetupsArray(arr){
     existing.htfReason = existing.htfReason || s.htfReason;
     existing.ltfReason = existing.ltfReason || s.ltfReason;
     existing.validationReason = existing.validationReason || s.validationReason;
+    existing.manip = existing.manip || s.manip;
+    existing.c3StartTs = existing.c3StartTs || s.c3StartTs;
+    existing.ltfConfirmTs = existing.ltfConfirmTs || s.ltfConfirmTs;
+    existing.ltfZone = existing.ltfZone || s.ltfZone;
     if(!existing.hitHistory || !existing.hitHistory.length){
       existing.hitHistory = s.hitHistory || s.hit_history || [];
     }
@@ -1688,6 +1766,9 @@ function toClientSetupFromServerRow(row){
   s.entryTs = s.entryTs || (row && row.entry_ts);
   s.hitHistory = bestHistory;
   s.recordedTs = s.recordedTs || ((row && row.created_at) ? new Date(row.created_at).getTime() : Date.now());
+  s.c3StartTs = s.c3StartTs || null;
+  s.ltfConfirmTs = s.ltfConfirmTs || null;
+  s.ltfZone = s.ltfZone || null;
   s._serverAuthoritative = true;
   return s;
 }
@@ -2006,6 +2087,12 @@ function getSetupConfluences(s, setupType, ltfType){
   return out;
 }
 
+function formatDateTime(ts){
+  const n = Number(ts);
+  if(!Number.isFinite(n) || n <= 0) return '—';
+  return new Date(n).toLocaleString();
+}
+
 function buildSetupReasonHtml(s){
   if(!s) return 'No setup details available.';
   const side = String(s.side || '').toUpperCase();
@@ -2015,12 +2102,19 @@ function buildSetupReasonHtml(s){
   const ltfReasonRaw = String(s.ltfReason || '');
   const ltfReason = toLearnerText(ltfReasonRaw || 'The lower timeframe aligned and confirmed the same direction.');
   const validationReason = toLearnerText(s.validationReason || 'Both timeframes agreed, so the setup was validated and posted as valid.');
-  const refTs = (s.ref && s.ref.t) || s.h1_ts || null;
-  const c1Window = formatH1Window(refTs) || 'focus H1 candle';
-  const c2Window = formatH1Window(Number(refTs) + 60 * 60 * 1000) || 'next H1 candle';
+  const c1Ts = Number((s.ref && s.ref.t) || s.h1_ts || null);
+  const c2Ts = Number((s.manip && s.manip.t) || (Number.isFinite(c1Ts) ? (c1Ts + 60 * 60 * 1000) : null));
+  const c3StartTs = Number(s.c3StartTs || (Number.isFinite(c2Ts) ? (c2Ts + 60 * 60 * 1000) : null));
+  const c1Window = formatH1Window(c1Ts) || 'focus H1 candle';
+  const c2Window = formatH1Window(c2Ts) || 'next H1 candle';
+  const c3Window = formatH1Window(c3StartTs) || 'current H1 runner candle';
   const ltfType = getLtfConfirmationTypeText(ltfReasonRaw);
   const entry = priceText(s.entry);
   const confluences = getSetupConfluences(s, setupType, ltfType);
+  const ltfConfirmAt = formatDateTime(s.ltfConfirmTs || s.entryTs || s.recordedTs);
+  const ltfZoneText = (s.ltfZone && Number.isFinite(Number(s.ltfZone.low)) && Number.isFinite(Number(s.ltfZone.high)))
+    ? `${priceText(s.ltfZone.low)} to ${priceText(s.ltfZone.high)}`
+    : 'not captured';
 
   const isBuy = side !== 'SELL';
   const trendText = setupType === 'REVERSAL'
@@ -2042,9 +2136,10 @@ function buildSetupReasonHtml(s){
       : (isBuy ? 'aiming movement toward buy-side liquidity' : 'aiming movement toward sell-side liquidity'));
 
   const paragraph = `This ${isBuy ? 'buy' : 'sell'} setup was posted because ${trendText}, then the ${c1Window} ${focusCandleText} formed and ${sweepText}. The ${rejectionText}. After that, ${ltfMomentumText}. ${ltfExplainText} The setup was validated as ${setupType === 'UNKNOWN' ? 'valid directional setup' : setupType.toLowerCase()} and posted, ${objectiveText}. ${htfReason} ${ltfReason} ${validationReason}`;
-  const markGuide = `Mark these on chart: H1 focus candle (${c1Window}), H1 rejection candle (${c2Window}), and system entry (${entry}).`;
+  const markGuide = `Mark these on chart: H1 C1 (${c1Window}), H1 C2 (${c2Window}), H1 C3 runner (${c3Window}), and system entry (${entry}).`;
+  const ltfGuide = `LTF evidence at posting: confirmation time ${ltfConfirmAt}, confirmation zone ${ltfZoneText}.`;
   const confluenceLine = `Confluences used: ${confluences.join(' • ')}.`;
-  return `${heading}<br/><br/>${paragraph}<br/><br/>${markGuide}<br/>${confluenceLine}`;
+  return `${heading}<br/><br/>${paragraph}<br/><br/>${markGuide}<br/>${ltfGuide}<br/>${confluenceLine}`;
 }
 
 function openSetupReasonModalById(encodedId){
@@ -2428,7 +2523,7 @@ async function checkAllAssetsSignals(){
     const h1 = await fetchHistorical(symbol, '1h', 300);
     const m5 = await fetchHistorical(symbol, '5m', 300);
     if(!h1 || !m5) return null;
-    const h1Crt = analyzeCRTWithData(h1);
+    const h1Crt = analyzeCRTWithData(h1, getStrictH1CrtOptions());
     if(h1Crt.status !== 'VALID CRT SETUP') return null;
     const m5Confirm = confirmM5WithH1(m5, h1Crt);
     if(!m5Confirm.ok || !m5Confirm.sweep) return null;
@@ -2492,6 +2587,10 @@ async function checkAllAssetsSignals(){
       tp3,
       h1_ts,
       ref: h1Crt.ref,
+      manip: h1Crt.manip,
+      c3StartTs: (h1Crt && h1Crt.manip && Number.isFinite(Number(h1Crt.manip.t))) ? (Number(h1Crt.manip.t) + 60 * 60 * 1000) : null,
+      ltfConfirmTs: (m5Confirm && m5Confirm.sweep && Number.isFinite(Number(m5Confirm.sweep.t))) ? Number(m5Confirm.sweep.t) : Date.now(),
+      ltfZone: (m5Confirm && m5Confirm.zone) ? { low: Number(m5Confirm.zone.low), high: Number(m5Confirm.zone.high) } : null,
       htfReason: h1Crt.reason,
       ltfReason: m5Confirm.reason,
       validationReason: 'HTF and LTF alignment validated and posted as valid setup.'
@@ -2717,7 +2816,11 @@ async function computeDailyOutlook(symbol){
     const d1 = await fetchHistorical(symbol, '1d', 90);
     const h1 = await fetchHistorical(symbol, '1h', 24*14);
     if(!d1 || !h1) return 'Data error';
-    const d1Crt = analyzeCRTWithData(d1);
+    const d1Crt = analyzeCRTWithData(d1, {
+      requireLatestPair: true,
+      intervalMs: 24 * 60 * 60 * 1000,
+      staleReason: 'D1 setup expired; waiting for latest C1/C2.'
+    });
     if(d1Crt.status !== 'VALID CRT SETUP') return 'DAY: WAITING';
     const h1Confirm = confirmH1WithD1(h1, d1Crt);
     const target = d1Crt.side === 'BUY' ? d1Crt.range.high : d1Crt.range.low;
