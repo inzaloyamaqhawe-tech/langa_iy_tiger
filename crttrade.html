@@ -247,9 +247,6 @@
                 <option value="3000">TP5</option>
               </select>
             </div>
-            <div class="flex items-end">
-              <button id="calcProfitBtn" class="btn btn-navy w-full">Calculate</button>
-            </div>
           </div>
           <div id="profitResult" class="tag mt-3">Profit: —</div>
         </div>
@@ -2249,7 +2246,6 @@ document.getElementById('pushPending').addEventListener('click', async ()=>{
 
 const lotSizeInput = document.getElementById('lotSizeInput');
 const tpChoice = document.getElementById('tpChoice');
-const calcProfitBtn = document.getElementById('calcProfitBtn');
 const profitResult = document.getElementById('profitResult');
 function calculateProfitLive(){
   const MIN_LOT = 0.01;
@@ -2276,9 +2272,6 @@ function calculateProfitLive(){
   if(profitResult) profitResult.innerText = `Profit: ${profit.toFixed(2)}`;
 }
 
-if(calcProfitBtn){
-  calcProfitBtn.addEventListener('click', ()=> calculateProfitLive());
-}
 if(lotSizeInput){
   lotSizeInput.addEventListener('input', ()=> calculateProfitLive());
 }
