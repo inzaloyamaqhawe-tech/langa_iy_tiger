@@ -1353,22 +1353,35 @@ function saveSetups(list){
 }
 function loadSetups(){ try{ const raw = JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY) || '[]'); return normalizeSetupsArray(Array.isArray(raw)?raw:[]); }catch(e){ return []; } }
 
+function normalizeC1Timestamp(rawTs){
+  const n = Number(rawTs);
+  if(!Number.isFinite(n) || n <= 0) return null;
+  const ms = n < 1e12 ? Math.round(n * 1000) : Math.round(n);
+  const h1Ms = 60 * 60 * 1000;
+  return Math.floor(ms / h1Ms) * h1Ms;
+}
+
 function getCanonicalId(s){
   if(!s) return null;
-  if(s.ref && s.ref.t){ const sym = s.symbol || ''; return `${sym}|${s.ref.t}`; }
-  if(s.h1_ts) return `${s.symbol}|${s.h1_ts}`;
+  const symbol = normalizeSymbolAlias(s.symbol || '');
+  const c1Ts = normalizeC1Timestamp((s.ref && s.ref.t) || s.h1_ts);
+  if(symbol && c1Ts) return `${symbol}|${c1Ts}`;
   if(s.id) return s.id;
   return null;
 }
 
 function getC1IdentityForView(s){
   if(!s) return null;
-  const symbol = String(s.symbol || '').toUpperCase();
-  const c1ts = (s.ref && s.ref.t) || s.h1_ts || null;
+  const symbol = normalizeSymbolAlias(s.symbol || '');
+  const c1ts = normalizeC1Timestamp((s.ref && s.ref.t) || s.h1_ts);
   if(symbol && c1ts) return `${symbol}|${c1ts}`;
   const rawId = String(s.id || s.canonical_id || '');
   const m = rawId.match(/^([^|]+)\|(\d{10,13})/);
-  if(m) return `${String(m[1]||'').toUpperCase()}|${m[2]}`;
+  if(m){
+    const mSymbol = normalizeSymbolAlias(String(m[1] || ''));
+    const mTs = normalizeC1Timestamp(m[2]);
+    if(mSymbol && mTs) return `${mSymbol}|${mTs}`;
+  }
   return rawId || null;
 }
 
@@ -1522,11 +1535,16 @@ function normalizeSymbolAlias(sym){
 
 function extractSetupSyncKey(s){
   if(!s) return null;
-  if(s.ref && s.ref.t) return `PAXGUSDT|${s.ref.t}`;
-  if(s.h1_ts) return `PAXGUSDT|${s.h1_ts}`;
+  const symbol = normalizeSymbolAlias(s.symbol || 'PAXGUSDT');
+  const c1Ts = normalizeC1Timestamp((s.ref && s.ref.t) || s.h1_ts);
+  if(symbol && c1Ts) return `${symbol}|${c1Ts}`;
   const id = String(s.id || getCanonicalId(s) || '');
   if(!id) return null;
-  if(id.includes('|')) return `PAXGUSDT|${id.split('|').pop()}`;
+  if(id.includes('|')){
+    const parts = id.split('|');
+    const idTs = normalizeC1Timestamp(parts[parts.length - 1]);
+    if(symbol && idTs) return `${symbol}|${idTs}`;
+  }
   return id;
 }
 
