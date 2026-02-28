@@ -250,6 +250,14 @@
           </div>
           <div id="profitResult" class="tag mt-3">Profit: —</div>
         </div>
+
+        <div id="setupReasonModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;align-items:center;justify-content:center;padding:16px;">
+          <div class="card" style="max-width:760px;width:100%;max-height:80vh;overflow:auto;position:relative;">
+            <button id="closeSetupReasonModal" class="btn btn-black" style="position:absolute;right:12px;top:12px;">Close</button>
+            <h3 id="setupReasonTitle" class="font-semibold">Setup Reason</h3>
+            <div id="setupReasonBody" class="small mt-3 tag">—</div>
+          </div>
+        </div>
       </main>
     </div>
 
@@ -896,6 +904,8 @@ function analyzeCRTWithData(data){
     reason,
     details,
     range: {high:crh, low:crl, mid},
+    scorePct: pct,
+    sweepInfo,
     ref: c1,
     manip: c2
   };
@@ -989,6 +999,112 @@ function confirmM5WithH1(m5Data, h1Signal){
     sweep: sweepCandle,
     entry
   };
+}
+
+function avgClose(data){
+  if(!Array.isArray(data) || !data.length) return null;
+  const sum = data.reduce((acc, c)=>acc + Number(c.c || 0), 0);
+  return sum / data.length;
+}
+
+function detectH1TrendBias(h1Data, fastLen=8, slowLen=21){
+  const closed = getClosed(h1Data);
+  if(closed.length < (slowLen + 6)) return 'RANGE';
+  const fastNow = avgClose(closed.slice(-fastLen));
+  const slowNow = avgClose(closed.slice(-slowLen));
+  const slowPrev = avgClose(closed.slice(-(slowLen + 5), -5));
+  if(!Number.isFinite(fastNow) || !Number.isFinite(slowNow) || !Number.isFinite(slowPrev)) return 'RANGE';
+
+  const last = closed[closed.length - 1];
+  const recentSwingHigh = Math.max(...closed.slice(-14, -1).map(c=>c.h));
+  const recentSwingLow = Math.min(...closed.slice(-14, -1).map(c=>c.l));
+  const maDelta = fastNow - slowNow;
+  const slowSlope = slowNow - slowPrev;
+
+  if(maDelta > 0 && slowSlope >= 0 && last.c >= recentSwingLow) return 'UP';
+  if(maDelta < 0 && slowSlope <= 0 && last.c <= recentSwingHigh) return 'DOWN';
+  return 'RANGE';
+}
+
+function getContinuationBiasFromH1Candle(c1){
+  if(!c1) return null;
+  if(!isCleanImpulse(c1)) return null;
+  const range = Math.max(1e-9, c1.h - c1.l);
+  const closePos = (c1.c - c1.l) / range; // 0..1
+  if(c1.c > c1.o && closePos >= 0.7) return 'BUY';
+  if(c1.c < c1.o && closePos <= 0.3) return 'SELL';
+  return null;
+}
+
+function findM5TurtleSoupReturn(m5Data, range, side, lookback=48){
+  const closed = getClosed(m5Data);
+  if(!closed.length || !range || !Number.isFinite(range.high) || !Number.isFinite(range.low)) return null;
+  const start = Math.max(0, closed.length - lookback);
+  for(let i=closed.length-1; i>=start; i--){
+    const c = closed[i];
+    const closedInside = c.c < range.high && c.c > range.low;
+    if(!closedInside) continue;
+    if(side === 'BUY'){
+      if(c.l < range.low) return c; // sweep low then close back inside
+    }else if(side === 'SELL'){
+      if(c.h > range.high) return c; // sweep high then close back inside
+    }
+  }
+  return null;
+}
+
+function isContinuationBreakoutInvalid(m5Data, range, side, lookback=6){
+  const closed = getClosed(m5Data);
+  if(!closed.length || !range) return false;
+  const recent = closed.slice(-lookback);
+  if(side === 'BUY') return recent.every(c => c.c < range.low);
+  if(side === 'SELL') return recent.every(c => c.c > range.high);
+  return false;
+}
+
+function classifyAndQualifySetup(h1Data, m5Data, h1Crt, m5Confirm){
+  if(!h1Crt || h1Crt.status !== 'VALID CRT SETUP') return { ok:false, setupType:null, reason:'Waiting for H1 setup.' };
+  if(!m5Confirm || !m5Confirm.ok) return { ok:false, setupType:null, reason:'Waiting for M5 confirmation.' };
+
+  const trend = detectH1TrendBias(h1Data);
+  const side = (h1Crt.side || '').toUpperCase();
+  const isContinuation = (trend === 'UP' && side === 'BUY') || (trend === 'DOWN' && side === 'SELL');
+  const setupType = isContinuation ? 'CONTINUATION' : 'REVERSAL';
+
+  const mss = detectMSS(m5Data, side, 12);
+  const sweepInfo = h1Crt.sweepInfo || isSweepWithTolerance(h1Crt.manip, h1Crt.range.high, h1Crt.range.low, 0.02);
+  const sweepStrength = Math.max(Number(sweepInfo && sweepInfo.highEx) || 0, Number(sweepInfo && sweepInfo.lowEx) || 0);
+  const scorePct = Number(h1Crt.scorePct || 0);
+
+  // Tightening logic to reduce SL from manipulative pullbacks:
+  // continuation: require H1 continuation impulse + 5M Turtle Soup return + no invalid breakout behavior
+  if(isContinuation){
+    const continuationBias = getContinuationBiasFromH1Candle(h1Crt.ref);
+    if(!continuationBias || continuationBias !== side){
+      return { ok:false, setupType, reason:'Waiting for stronger confirmation.' };
+    }
+    const turtleSoup = findM5TurtleSoupReturn(m5Data, h1Crt.range, side, 48);
+    if(!turtleSoup){
+      return { ok:false, setupType, reason:'Waiting for stronger confirmation.' };
+    }
+    if(isContinuationBreakoutInvalid(m5Data, h1Crt.range, side, 6)){
+      return { ok:false, setupType, reason:'Waiting for stronger confirmation.' };
+    }
+    const mss = detectMSS(m5Data, side, 12);
+    // Per rules: close-back-inside is valid; MSS/FVG/OB is an optional stronger trigger.
+    if(!mss.ok && !m5Confirm.zone){
+      return { ok:false, setupType, reason:'Waiting for stronger confirmation.' };
+    }
+    if(scorePct < 0.6) return { ok:false, setupType, reason:'Waiting for stronger confirmation.' };
+    return { ok:true, setupType, reason:m5Confirm.reason };
+  }
+
+  // reversal: require stronger quality and clear M5 structure shift
+  if(scorePct < 0.75) return { ok:false, setupType, reason:'Waiting for stronger confirmation.' };
+  if(sweepStrength < 0.035) return { ok:false, setupType, reason:'Waiting for stronger confirmation.' };
+  if(!mss.ok) return { ok:false, setupType, reason:'Waiting for stronger confirmation.' };
+
+  return { ok:true, setupType, reason:m5Confirm.reason };
 }
 
 function rrTargets(entry, sl){
@@ -1161,9 +1277,16 @@ async function updateLiveAndCRT(force=false){
   }
 
   const h1Crt = analyzeCRTWithData(RUNTIME.historyH1);
-  const m5Confirm = (h1Crt.status === 'VALID CRT SETUP')
+  let m5Confirm = (h1Crt.status === 'VALID CRT SETUP')
     ? confirmM5WithH1(RUNTIME.historyM5, h1Crt)
     : {ok:false, reason:'Waiting for H1 setup.'};
+
+  if(h1Crt.status === 'VALID CRT SETUP' && m5Confirm.ok){
+    const qualified = classifyAndQualifySetup(RUNTIME.historyH1, RUNTIME.historyM5, h1Crt, m5Confirm);
+    if(!qualified.ok){
+      m5Confirm = { ...m5Confirm, ok:false, reason: qualified.reason || 'Waiting for stronger confirmation.' };
+    }
+  }
   updateCRTUI(h1Crt, m5Confirm);
 }
 
@@ -1194,7 +1317,8 @@ async function applyCachedSignalIfValid(symbol){
     ? confirmM5WithH1(m5, h1Crt)
     : {ok:false};
 
-  if(h1Crt.status !== 'VALID CRT SETUP' || !m5Confirm.ok){
+  const qualified = classifyAndQualifySetup(h1, m5, h1Crt, m5Confirm);
+  if(h1Crt.status !== 'VALID CRT SETUP' || !m5Confirm.ok || !qualified.ok){
     clearCachedSignal(symbol);
     return;
   }
@@ -1336,6 +1460,10 @@ function normalizeSetupsArray(arr){
     existing.tp4 = existing.tp4 || s.tp4;
     existing.tp5 = existing.tp5 || s.tp5;
     existing.tp6 = existing.tp6 || s.tp6;
+    existing.setupType = existing.setupType || s.setupType;
+    existing.htfReason = existing.htfReason || s.htfReason;
+    existing.ltfReason = existing.ltfReason || s.ltfReason;
+    existing.validationReason = existing.validationReason || s.validationReason;
     if(!existing.hitHistory || !existing.hitHistory.length){
       existing.hitHistory = s.hitHistory || s.hit_history || [];
     }
@@ -1712,6 +1840,8 @@ async function refreshSetupViews(){
     console.info(`[CRT DEDUPE] Hidden duplicate setups on frontend: ${hiddenDuplicates}`);
   }
 
+  LAST_RENDERED_SETUPS = Array.isArray(list) ? list : [];
+
   // keep local in sync with merged server view so notification gating uses the same state users see
   saveSetups(list);
   const sortByLatest = (a,b)=>{
@@ -1764,9 +1894,12 @@ async function refreshSetupViews(){
     const color = side === 'BUY' ? '#16a34a' : (side === 'SELL' ? '#dc2626' : '#6b7280');
     const entry = fmt2(s.entry);
     const symbol = displaySymbol(s.symbol);
+    const canonical = encodeURIComponent(getCanonicalId(s) || s.id || '');
+    const viewBtnColor = mode === 'success' ? '#16a34a' : (mode === 'pending' ? '#7c3aed' : '#dc2626');
     const header = `<div style="font-weight:800;color:${color}">${symbol} ${side || 'WAIT'}: <span style="font-weight:800">${entry}</span></div>`;
     const detail = `<div>${formatTpLine(s, mode)}</div>`;
-    return `<div class="list-item" style="flex-direction:column;align-items:flex-start;border-bottom:1px solid #e5e7eb">${header}${detail}</div>`;
+    const action = `<div style="margin-top:8px"><button class="setup-view-btn btn" data-id="${canonical}" data-mode="${mode}" style="background:${viewBtnColor};color:#fff;border:1px solid ${viewBtnColor}">View</button></div>`;
+    return `<div class="list-item" style="flex-direction:column;align-items:flex-start;border-bottom:1px solid #e5e7eb">${header}${detail}${action}</div>`;
   }
   document.getElementById('successList').innerHTML = success.map(s=>formatSetupCard(s, 'success')).join('') || '—';
   document.getElementById('failList').innerHTML = fail.map(s=>formatSetupCard(s, 'fail')).join('') || '—';
@@ -1777,6 +1910,42 @@ async function refreshSetupViews(){
   const successRate = decided ? Math.round((success.length / decided) * 100) : 0;
   document.getElementById('successRate').innerText = successRate + '%';
   renderDashboardChart().catch(()=>{});
+}
+
+let LAST_RENDERED_SETUPS = [];
+
+function buildSetupReasonHtml(s){
+  if(!s) return 'No setup details available.';
+  const side = String(s.side || '').toUpperCase();
+  const heading = side === 'SELL' ? 'REASON SELL:' : 'REASON BUY:';
+  const setupType = String(s.setupType || 'UNKNOWN').toUpperCase();
+  const htfReason = s.htfReason || s.reason || 'HTF CRT range/sweep decision confirmed.';
+  const ltfReason = s.ltfReason || 'LTF alignment confirmed by sweep-close-back-inside with MSS/zone support.';
+  const validationReason = s.validationReason || 'Setup passed HTF + LTF validation and was posted as VALID.';
+  return `${heading}<br/><br/>`+
+    `<strong>HTF Detection:</strong> ${htfReason}<br/>`+
+    `<strong>Setup Type:</strong> ${setupType}<br/>`+
+    `<strong>LTF Alignment:</strong> ${ltfReason}<br/>`+
+    `<strong>Validation:</strong> ${validationReason}`;
+}
+
+function openSetupReasonModalById(encodedId){
+  const id = decodeURIComponent(encodedId || '');
+  if(!id) return;
+  const s = (LAST_RENDERED_SETUPS || []).find(x => (getCanonicalId(x) || x.id) === id || x.id === id);
+  const modal = document.getElementById('setupReasonModal');
+  const title = document.getElementById('setupReasonTitle');
+  const body = document.getElementById('setupReasonBody');
+  if(!modal || !title || !body) return;
+  const side = (s && s.side ? String(s.side).toUpperCase() : 'WAIT');
+  title.innerText = side === 'SELL' ? 'Reason Sell' : 'Reason Buy';
+  body.innerHTML = buildSetupReasonHtml(s);
+  modal.style.display = 'flex';
+}
+
+function closeSetupReasonModal(){
+  const modal = document.getElementById('setupReasonModal');
+  if(modal) modal.style.display = 'none';
 }
 
 // fetch server setups (return client-shaped array) - returns null on error
@@ -2145,6 +2314,8 @@ async function checkAllAssetsSignals(){
     if(h1Crt.status !== 'VALID CRT SETUP') return null;
     const m5Confirm = confirmM5WithH1(m5, h1Crt);
     if(!m5Confirm.ok || !m5Confirm.sweep) return null;
+    const qualified = classifyAndQualifySetup(h1, m5, h1Crt, m5Confirm);
+    if(!qualified.ok) return null;
 
     const entry = m5Confirm.entry || h1Crt.range.mid;
     let tp1 = h1Crt.range.mid;
@@ -2181,7 +2352,7 @@ async function checkAllAssetsSignals(){
       return null;
     }
 
-    return { symbol, h1, m5, h1Crt, m5Confirm, entry, sl, tp1, tp2, tp3, tp4, tp5, tp6 };
+    return { symbol, h1, m5, h1Crt, m5Confirm, entry, sl, tp1, tp2, tp3, tp4, tp5, tp6, setupType: qualified.setupType };
   }));
 
   // Fire all notifications at the same time (batch)
@@ -2189,11 +2360,25 @@ async function checkAllAssetsSignals(){
   if(!valid.length) return;
 
   for(const res of valid){
-    const { symbol, h1, m5, h1Crt, m5Confirm, entry, sl, tp1, tp2, tp3, tp4, tp5, tp6 } = res;
+    const { symbol, h1, m5, h1Crt, m5Confirm, entry, sl, tp1, tp2, tp3, tp4, tp5, tp6, setupType } = res;
 
     // compute h1_ts for dedupe and to check existing saved setups
     const h1_ts = (h1Crt && h1Crt.ref && h1Crt.ref.t) ? h1Crt.ref.t : (h1 && h1.length>1 ? h1[h1.length-2].t : Date.now());
-    const setupObj = { symbol, side: h1Crt.side, entry, sl, tp1, tp2, tp3, h1_ts, ref: h1Crt.ref };
+    const setupObj = {
+      symbol,
+      side: h1Crt.side,
+      entry,
+      sl,
+      tp1,
+      tp2,
+      tp3,
+      h1_ts,
+      ref: h1Crt.ref,
+      htfReason: h1Crt.reason,
+      ltfReason: m5Confirm.reason,
+      validationReason: 'HTF and LTF alignment validated and posted as valid setup.'
+    };
+    if(setupType) setupObj.setupType = setupType;
     if(typeof tp4 !== 'undefined' && tp4 !== null) setupObj.tp4 = tp4;
     if(typeof tp5 !== 'undefined' && tp5 !== null) setupObj.tp5 = tp5;
     if(typeof tp6 !== 'undefined' && tp6 !== null) setupObj.tp6 = tp6;
@@ -2274,6 +2459,22 @@ applyKeysBtn.addEventListener('click', ()=> {
   RUNTIME.CORS_PROXY = corsProxyInput.value.trim();
   alert('Keys applied for this session (not saved).');
 });
+
+document.addEventListener('click', (e)=>{
+  const btn = e.target && e.target.closest ? e.target.closest('.setup-view-btn') : null;
+  if(btn){
+    openSetupReasonModalById(btn.getAttribute('data-id') || '');
+    return;
+  }
+  if(e.target && e.target.id === 'closeSetupReasonModal'){
+    closeSetupReasonModal();
+    return;
+  }
+  if(e.target && e.target.id === 'setupReasonModal'){
+    closeSetupReasonModal();
+  }
+});
+document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeSetupReasonModal(); });
 
 // Sidebar and import/export wiring
 document.getElementById('exportJson').addEventListener('click', exportSetups);
