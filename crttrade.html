@@ -2011,6 +2011,49 @@ function toLearnerText(text){
     .trim();
 }
 
+function sanitizeNarrativeSource(text){
+  const raw = String(text || '').trim();
+  if(!raw) return '';
+  return raw
+    .replace(/^\s*(TP\d+|SL)\b[:\-\s]*/i, '')
+    .replace(/\b(TP\d+|SL)\b(?=\s+[A-Z][a-z])/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function dedupeSentences(parts){
+  const seen = new Set();
+  const out = [];
+  for(const part of (parts || [])){
+    const t = String(part || '').trim();
+    if(!t) continue;
+    const pieces = t.split(/(?<=[.!?])\s+/).map(x=>x.trim()).filter(Boolean);
+    for(const piece of pieces){
+      const key = piece.toLowerCase();
+      if(seen.has(key)) continue;
+      seen.add(key);
+      out.push(piece);
+    }
+  }
+  return out.join(' ');
+}
+
+function describeH1Candle(c, role){
+  if(!c) return role === 'C2' ? 'response candle' : 'focus candle';
+  const direction = c.c >= c.o ? 'bullish' : 'bearish';
+  const body = candleBodyPct(c);
+  const wick = hammerDirection(c);
+  if(role === 'C1'){
+    if(body >= 0.6) return `strong ${direction} impulse candle`;
+    if(body <= 0.2) return `${direction} indecision candle`;
+    return `${direction} structure candle`;
+  }
+  if(wick === 'UPPER') return `${direction} response candle with upper-wick rejection`;
+  if(wick === 'LOWER') return `${direction} response candle with lower-wick rejection`;
+  if(body >= 0.6) return `strong ${direction} response candle`;
+  return `${direction} response candle`;
+}
+
 function formatH1Window(ts){
   const n = Number(ts);
   if(!Number.isFinite(n) || n <= 0) return null;
@@ -2074,9 +2117,10 @@ function priceText(v){
 
 function getSetupConfluences(s, setupType, ltfType){
   const out = [];
+  const ltfTypeLabel = (ltfType === 'LTF confirmation') ? 'general LTF confirmation' : ltfType;
   out.push('HTF CRT sweep and close-back-inside confirmation');
   out.push(`Setup type filter: ${setupType === 'UNKNOWN' ? 'validated' : setupType.toLowerCase()}`);
-  out.push(`LTF confirmation type: ${ltfType}`);
+  out.push(`LTF confirmation type: ${ltfTypeLabel}`);
   if((s && s.side ? String(s.side).toUpperCase() : '') === 'BUY'){
     out.push('Directional alignment toward buy-side liquidity');
   }else if((s && s.side ? String(s.side).toUpperCase() : '') === 'SELL'){
@@ -2098,10 +2142,10 @@ function buildSetupReasonHtml(s){
   const side = String(s.side || '').toUpperCase();
   const heading = side === 'SELL' ? 'REASON SELL:' : 'REASON BUY:';
   const setupType = inferSetupTypeFromText(s);
-  const htfReason = toLearnerText(s.htfReason || s.reason || 'The higher timeframe CRT was marked clearly and gave direction.');
-  const ltfReasonRaw = String(s.ltfReason || '');
+  const htfReason = toLearnerText(sanitizeNarrativeSource(s.htfReason || 'The higher timeframe CRT was marked clearly and gave direction.'));
+  const ltfReasonRaw = sanitizeNarrativeSource(String(s.ltfReason || ''));
   const ltfReason = toLearnerText(ltfReasonRaw || 'The lower timeframe aligned and confirmed the same direction.');
-  const validationReason = toLearnerText(s.validationReason || 'Both timeframes agreed, so the setup was validated and posted as valid.');
+  const validationReason = toLearnerText(sanitizeNarrativeSource(s.validationReason || 'Both timeframes agreed, so the setup was validated and posted as valid.'));
   const c1Ts = Number((s.ref && s.ref.t) || s.h1_ts || null);
   const c2Ts = Number((s.manip && s.manip.t) || (Number.isFinite(c1Ts) ? (c1Ts + 60 * 60 * 1000) : null));
   const c3StartTs = Number(s.c3StartTs || (Number.isFinite(c2Ts) ? (c2Ts + 60 * 60 * 1000) : null));
@@ -2122,12 +2166,14 @@ function buildSetupReasonHtml(s){
     : (setupType === 'CONTINUATION'
       ? (isBuy ? 'inside a bullish continuation context in the 1H timeframe' : 'inside a bearish continuation context in the 1H timeframe')
       : 'after HTF CRT conditions were confirmed in the 1H timeframe');
-  const focusCandleText = isBuy ? 'strong bearish focus candle' : 'strong bullish focus candle';
+  const focusCandleText = describeH1Candle(s && s.ref, 'C1');
+  const c2CandleText = describeH1Candle(s && s.manip, 'C2');
   const sweepText = isBuy ? 'its liquidity was swept below its low' : 'its liquidity was swept above its high';
-  const rejectionText = `${c2Window} rejection candle closed back into the focus-candle range`;
+  const rejectionText = `${c2Window} ${c2CandleText} closed back into the C1 range`;
+  const ltfLabel = (ltfType === 'LTF confirmation') ? 'lower-timeframe' : ltfType;
   const ltfMomentumText = isBuy
-    ? `the ${ltfType} confirmation on the 5M timeframe supported bullish momentum after the sweep`
-    : `the ${ltfType} confirmation on the 5M timeframe supported bearish momentum after the sweep`;
+    ? `the ${ltfLabel} confirmation on the 5M timeframe supported bullish momentum after the sweep`
+    : `the ${ltfLabel} confirmation on the 5M timeframe supported bearish momentum after the sweep`;
   const ltfExplainText = getLtfExplanationText(ltfType, isBuy);
   const objectiveText = setupType === 'REVERSAL'
     ? (isBuy ? 'aiming a reversal of gold price toward buy-side liquidity' : 'aiming a reversal of gold price toward sell-side liquidity')
@@ -2135,7 +2181,8 @@ function buildSetupReasonHtml(s){
       ? (isBuy ? 'aiming continuation toward buy-side liquidity' : 'aiming continuation toward sell-side liquidity')
       : (isBuy ? 'aiming movement toward buy-side liquidity' : 'aiming movement toward sell-side liquidity'));
 
-  const paragraph = `This ${isBuy ? 'buy' : 'sell'} setup was posted because ${trendText}, then the ${c1Window} ${focusCandleText} formed and ${sweepText}. The ${rejectionText}. After that, ${ltfMomentumText}. ${ltfExplainText} The setup was validated as ${setupType === 'UNKNOWN' ? 'valid directional setup' : setupType.toLowerCase()} and posted, ${objectiveText}. ${htfReason} ${ltfReason} ${validationReason}`;
+  const mainText = `This ${isBuy ? 'buy' : 'sell'} setup was posted because ${trendText}, then the ${c1Window} ${focusCandleText} formed and ${sweepText}. The ${rejectionText}. After that, ${ltfMomentumText}. ${ltfExplainText} The setup was validated as ${setupType === 'UNKNOWN' ? 'valid directional setup' : setupType.toLowerCase()} and posted, ${objectiveText}.`;
+  const paragraph = dedupeSentences([mainText, htfReason, ltfReason, validationReason]);
   const markGuide = `Mark these on chart: H1 C1 (${c1Window}), H1 C2 (${c2Window}), H1 C3 runner (${c3Window}), and system entry (${entry}).`;
   const ltfGuide = `LTF evidence at posting: confirmation time ${ltfConfirmAt}, confirmation zone ${ltfZoneText}.`;
   const confluenceLine = `Confluences used: ${confluences.join(' • ')}.`;
