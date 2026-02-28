@@ -109,7 +109,7 @@
             <div class="mt-4">Win Percentage: <span id="successRate">0%</span></div>
 
             <div class="mt-4 light-card">
-              <h3 class="font-semibold">Weekly Success Rate (Last 7 days)</h3>
+              <h3 class="font-semibold">Weekly Success Rate (Mon-Fri)</h3>
               <div class="mt-2"><canvas id="dashboardSuccessChart" height="180"></canvas></div>
             </div>
           </div>
@@ -334,6 +334,26 @@ function intervalToMs(interval){
   if(interval === '5m') return 5 * 60 * 1000;
   if(interval === '1h') return 60 * 60 * 1000;
   return 5 * 60 * 1000;
+}
+
+function isBrokerWeekendClosed(ts = Date.now()){
+  const d = new Date(ts);
+  const day = d.getDay(); // 0=Sun, 1=Mon, ... 5=Fri, 6=Sat
+  const hh = d.getHours();
+  const mm = d.getMinutes();
+
+  // Closed from Friday 23:00
+  if(day === 5 && hh >= 23) return true;
+  // Fully closed Saturday + Sunday
+  if(day === 6 || day === 0) return true;
+  // Re-opens Monday 00:56
+  if(day === 1 && hh === 0 && mm <= 55) return true;
+
+  return false;
+}
+
+function marketClosedText(){
+  return 'Market closed (outside setup window: Mon 00:56 → Fri 22:59).';
 }
 
 function getPipSize(symbol){
@@ -1128,6 +1148,18 @@ async function updateLiveAndCRT(force=false){
   const recent = d.slice(-12).reverse();
   candleListEl.innerHTML = recent.map(r=>`<div><strong>${new Date(r.t).toLocaleString()}</strong> — O:${r.o} H:${r.h} L:${r.l} C:${r.c}</div>`).join('');
 
+  if(isBrokerWeekendClosed()){
+    setText(crtStatusEl, 'Status: MARKET CLOSED');
+    setText(crtSideEl, 'Side: WAIT');
+    setText(crtReasonEl, `Reason: ${marketClosedText()}`);
+    setText(h1StatusEl, 'MARKET CLOSED');
+    setText(h1ReasonEl, marketClosedText());
+    setText(m5StatusEl, 'MARKET CLOSED');
+    setText(m5ReasonEl, marketClosedText());
+    setHTML(crtDetailsEl, marketClosedText());
+    return;
+  }
+
   const h1Crt = analyzeCRTWithData(RUNTIME.historyH1);
   const m5Confirm = (h1Crt.status === 'VALID CRT SETUP')
     ? confirmM5WithH1(RUNTIME.historyM5, h1Crt)
@@ -1746,10 +1778,24 @@ async function renderDashboardChart(){
   let list = await fetchServerSetups();
   if(!list) list = loadSetups();
   list = dedupeRowsForView(list);
+
   const now = new Date();
+  const todayDay = now.getDay(); // 0=Sun ... 6=Sat
+  const mondayOffset = (todayDay === 0) ? -6 : (1 - todayDay);
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + mondayOffset);
+  monday.setHours(0,0,0,0);
+
   const days = [];
-  for(let i=6;i>=0;i--){ const d = new Date(now); d.setDate(now.getDate()-i); d.setHours(0,0,0,0); days.push(d); }
-  const labels = days.map(d=>`${d.getMonth()+1}/${d.getDate()}`);
+  for(let i=0;i<5;i++){
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push(d);
+  }
+
+  const dayNames = ['Mon','Tue','Wed','Thu','Fri'];
+  const labels = days.map((d,i)=>`${dayNames[i]} ${d.getMonth()+1}/${d.getDate()}`);
+
   const buyPerc = [];
   const sellPerc = [];
   for(const day of days){
@@ -1793,7 +1839,7 @@ async function renderDashboardChart(){
       maintainAspectRatio: false,
       scales: {
         y: { min:0, max:100, ticks: { callback: v => v + '%' }, title: { display:true, text:'Success Rate (%)' } },
-        x: { title: { display:true, text:'Day (last 7)' } }
+        x: { title: { display:true, text:'Day (Mon-Fri)' } }
       },
       plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } }
     }
@@ -1864,6 +1910,7 @@ async function resolveIntrabarFirstHit(symbol, side, tpPrices, slPrice, candleSt
 
 // monitor pending setups and mark success/failure by checking live price
 async function monitorSetups(){
+  if(isBrokerWeekendClosed()) return;
   const list = loadSetups();
   for(const s of list){
     if(!s || s.status === 'FAILED') continue;
@@ -2067,6 +2114,10 @@ async function checkAllAssetsSignals(){
   if(SCAN_IN_PROGRESS) return;
   SCAN_IN_PROGRESS = true;
   try{
+  if(isBrokerWeekendClosed()){
+    console.log('[SCAN SKIP] Market closed window active. No new setups/trades.');
+    return;
+  }
   const symbols = ['PAXGUSDT'];
   const results = await Promise.all(symbols.map(async (symbol) => {
     const h1 = await fetchHistorical(symbol, '1h', 300);
