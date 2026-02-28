@@ -105,6 +105,11 @@
                 <div class="d1-target" id="paxgTarget">D1 target: —</div>
                 <div class="d1-pill wait" id="paxgBadge">-</div>
               </div>
+              <div class="light-card" id="cardSetupStats">
+                <div class="d1-label">Total Setups</div>
+                <div class="d1-entry" id="totalSetupsValue">0</div>
+                <div class="d1-target" id="successfulSetupsValue">Successful Setups: 0</div>
+              </div>
             </div>
             <div class="mt-4">Win Percentage: <span id="successRate">0%</span></div>
 
@@ -1939,7 +1944,14 @@ async function refreshSetupViews(){
   }
   function displayTime(s){
     const ts = Number(s.resolvedAt || s.updatedAt || s.recordedTs || s.entryTs || 0);
-    return ts ? new Date(ts).toLocaleString() : '—';
+    return ts ? new Date(ts).toLocaleString([], {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }) : '—';
   }
   function displaySymbol(sym){
     const up = (sym||'').toUpperCase();
@@ -1990,6 +2002,10 @@ async function refreshSetupViews(){
   const decided = (success.length || 0) + (fail.length || 0);
   const successRate = decided ? Math.round((success.length / decided) * 100) : 0;
   document.getElementById('successRate').innerText = successRate + '%';
+  const totalSetupsEl = document.getElementById('totalSetupsValue');
+  const successfulSetupsEl = document.getElementById('successfulSetupsValue');
+  if(totalSetupsEl) totalSetupsEl.innerText = String((list || []).length);
+  if(successfulSetupsEl) successfulSetupsEl.innerText = `Successful Setups: ${success.length}`;
   renderDashboardChart().catch(()=>{});
 }
 
@@ -2052,6 +2068,26 @@ function describeH1Candle(c, role){
   if(wick === 'LOWER') return `${direction} response candle with lower-wick rejection`;
   if(body >= 0.6) return `strong ${direction} response candle`;
   return `${direction} response candle`;
+}
+
+function isLongWickCandle(c, minWickToBody=1.5){
+  if(!c) return false;
+  const body = Math.max(1e-9, Math.abs(c.c - c.o));
+  const upperWick = Math.max(0, c.h - Math.max(c.o, c.c));
+  const lowerWick = Math.max(0, Math.min(c.o, c.c) - c.l);
+  const longWick = Math.max(upperWick, lowerWick);
+  return (longWick / body) >= minWickToBody;
+}
+
+function isC2RejectionByRule(c1, c2){
+  if(!c1 || !c2) return false;
+  const hammer = hammerDirection(c2);
+  const isHammerType = hammer === 'LOWER' || hammer === 'UPPER';
+  if(!isHammerType) return false;
+  const swept = (Number(c2.h) > Number(c1.h)) || (Number(c2.l) < Number(c1.l));
+  const closedInside = Number(c2.c) < Number(c1.h) && Number(c2.c) > Number(c1.l);
+  const longWick = isLongWickCandle(c2, 1.5);
+  return swept && closedInside && longWick;
 }
 
 function formatH1Window(ts){
@@ -2169,7 +2205,10 @@ function buildSetupReasonHtml(s){
   const focusCandleText = describeH1Candle(s && s.ref, 'C1');
   const c2CandleText = describeH1Candle(s && s.manip, 'C2');
   const sweepText = isBuy ? 'its liquidity was swept below its low' : 'its liquidity was swept above its high';
-  const rejectionText = `${c2Window} ${c2CandleText} closed back into the C1 range`;
+  const c2IsRejection = isC2RejectionByRule(s && s.ref, s && s.manip);
+  const c2ActionText = c2IsRejection
+    ? `${c2Window} rejection candle (hammer-type with long wick) swept and closed back inside the C1 range`
+    : `${c2Window} ${c2CandleText} closed back into the C1 range`;
   const ltfLabel = (ltfType === 'LTF confirmation') ? 'lower-timeframe' : ltfType;
   const ltfMomentumText = isBuy
     ? `the ${ltfLabel} confirmation on the 5M timeframe supported bullish momentum after the sweep`
@@ -2181,7 +2220,7 @@ function buildSetupReasonHtml(s){
       ? (isBuy ? 'aiming continuation toward buy-side liquidity' : 'aiming continuation toward sell-side liquidity')
       : (isBuy ? 'aiming movement toward buy-side liquidity' : 'aiming movement toward sell-side liquidity'));
 
-  const mainText = `This ${isBuy ? 'buy' : 'sell'} setup was posted because ${trendText}, then the ${c1Window} ${focusCandleText} formed and ${sweepText}. The ${rejectionText}. After that, ${ltfMomentumText}. ${ltfExplainText} The setup was validated as ${setupType === 'UNKNOWN' ? 'valid directional setup' : setupType.toLowerCase()} and posted, ${objectiveText}.`;
+  const mainText = `This ${isBuy ? 'buy' : 'sell'} setup was posted because ${trendText}, then the ${c1Window} ${focusCandleText} formed and ${sweepText}. The ${c2ActionText}. After that, ${ltfMomentumText}. ${ltfExplainText} The setup was validated as ${setupType === 'UNKNOWN' ? 'valid directional setup' : setupType.toLowerCase()} and posted, ${objectiveText}.`;
   const paragraph = dedupeSentences([mainText, htfReason, ltfReason, validationReason]);
   const markGuide = `Mark these on chart: H1 C1 (${c1Window}), H1 C2 (${c2Window}), H1 C3 runner (${c3Window}), and system entry (${entry}).`;
   const ltfGuide = `LTF evidence at posting: confirmation time ${ltfConfirmAt}, confirmation zone ${ltfZoneText}.`;
@@ -2803,7 +2842,7 @@ function calculateProfitLive(){
 
   const lotSize = rawLot;
   const profit = lotSize * points;
-  if(profitResult) profitResult.innerText = `Profit: ${profit.toFixed(2)}`;
+  if(profitResult) profitResult.innerText = `Profit: $${profit.toFixed(2)}`;
 }
 
 if(lotSizeInput){
