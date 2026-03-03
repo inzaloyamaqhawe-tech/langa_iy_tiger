@@ -1034,25 +1034,11 @@ function confirmM5WithH1(m5Data, h1Signal){
     : closed;
   if(window && !evalClosed.length) return {ok:false, reason:'Waiting for M5 confirmation inside C3 window.'};
 
-  let sweepCandle = null;
-  for(let i = evalClosed.length - 1; i >= Math.max(0, evalClosed.length - lookback); i--){
-    const c = evalClosed[i];
-    const sweepHigh = c.h > range.high;
-    const sweepLow = c.l < range.low;
-    const closeInside = c.c < range.high && c.c > range.low;
-    if(h1Signal.side === 'BUY' && sweepLow && closeInside){ sweepCandle = c; break; }
-    if(h1Signal.side === 'SELL' && sweepHigh && closeInside){ sweepCandle = c; break; }
-  }
-
-  if(!sweepCandle){
-    return {ok:false, reason:'M5 needs sweep + close back inside range during C3.'};
-  }
-
   const fvg = detectFVG(evalClosed);
   const ob = detectOB(evalClosed, h1Signal.side);
   const zone = fvg.zone || ob;
   if(!zone){
-    return {ok:false, reason:'Waiting for OB/FVG zone after M5 sweep during C3.'};
+    return {ok:false, reason:'Waiting for OB/FVG entry zone on M5 during C3.'};
   }
 
   const last = evalClosed[evalClosed.length-1];
@@ -1073,9 +1059,9 @@ function confirmM5WithH1(m5Data, h1Signal){
   }
   return {
     ok:true,
-    reason:`M5 confirmed: sweep + close inside. Entry on OB/FVG retest in ${h1Signal.side === 'BUY' ? 'DISCOUNT' : 'PREMIUM'} zone.`,
+    reason:`M5 confirmed: OB/FVG entry retest in ${h1Signal.side === 'BUY' ? 'DISCOUNT' : 'PREMIUM'} zone after H1 CRT validation.`,
     zone,
-    sweep: sweepCandle,
+    sweep: h1Signal.manip || null,
     entry
   };
 }
@@ -2266,21 +2252,24 @@ async function renderDashboardChart(){
   list = dedupeRowsForView(list);
 
   const now = new Date();
-  const todayDay = now.getDay(); // 0=Sun ... 6=Sat
-  const mondayOffset = (todayDay === 0) ? -6 : (1 - todayDay);
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + mondayOffset);
-  monday.setHours(0,0,0,0);
-
-  const days = [];
-  for(let i=0;i<5;i++){
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    days.push(d);
+  const endDay = new Date(now);
+  endDay.setHours(0,0,0,0);
+  while(endDay.getDay() === 0 || endDay.getDay() === 6){
+    endDay.setDate(endDay.getDate() - 1);
   }
 
-  const dayNames = ['Mon','Tue','Wed','Thu','Fri'];
-  const labels = days.map((d,i)=>`${dayNames[i]} ${d.getMonth()+1}/${d.getDate()}`);
+  const days = [];
+  const cursor = new Date(endDay);
+  while(days.length < 5){
+    const wd = cursor.getDay();
+    if(wd >= 1 && wd <= 5){
+      days.unshift(new Date(cursor));
+    }
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const labels = days.map(d=>`${dayNames[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}`);
 
   const buyPerc = [];
   const sellPerc = [];
@@ -2325,7 +2314,7 @@ async function renderDashboardChart(){
       maintainAspectRatio: false,
       scales: {
         y: { min:0, max:100, ticks: { callback: v => v + '%' }, title: { display:true, text:'Success Rate (%)' } },
-        x: { title: { display:true, text:'Day (Mon-Fri)' } }
+        x: { title: { display:true, text:'Last 5 Trading Days' } }
       },
       plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } }
     }
@@ -2900,20 +2889,20 @@ window.addEventListener('error', (ev)=>{
 async function computeDailyOutlook(symbol){
   try{
     const d1 = await fetchHistorical(symbol, '1d', 90);
-    const h1 = await fetchHistorical(symbol, '1h', 24*14);
-    if(!d1 || !h1) return 'Data error';
+    const m15 = await fetchHistorical(symbol, '15m', 96*14);
+    if(!d1 || !m15) return 'Data error';
     const d1Crt = analyzeCRTWithData(d1, {
       requireLatestPair: true,
       intervalMs: 24 * 60 * 60 * 1000,
       staleReason: 'D1 setup expired; waiting for latest C1/C2.'
     });
     if(d1Crt.status !== 'VALID CRT SETUP') return 'DAY: WAITING';
-    const h1Confirm = confirmH1WithD1(h1, d1Crt);
+    const m15Confirm = confirmM15WithD1(m15, d1Crt);
     const target = d1Crt.side === 'BUY' ? d1Crt.range.high : d1Crt.range.low;
-    if(!h1Confirm.ok){
-      return { status: `DAY: ${d1Crt.side}`, side: d1Crt.side, target, entry: null, confirmed: false, reason: h1Confirm.reason };
+    if(!m15Confirm.ok){
+      return { status: `DAY: ${d1Crt.side}`, side: d1Crt.side, target, entry: null, confirmed: false, reason: m15Confirm.reason };
     }
-    return { status: `DAY: ${d1Crt.side}`, entry: h1Confirm.entry, side: d1Crt.side, target, confirmed: true, reason: h1Confirm.reason };
+    return { status: `DAY: ${d1Crt.side}`, entry: m15Confirm.entry, side: d1Crt.side, target, confirmed: true, reason: m15Confirm.reason };
   }catch(e){ return 'Error computing outlook'; }
 }
 
@@ -2923,23 +2912,10 @@ function confirmM15WithD1(m15Data, d1Signal){
   if(closed.length < 200) return {ok:false, reason:'Insufficient M15 data'};
   if(!d1Signal || d1Signal.status !== 'VALID CRT SETUP' || !d1Signal.range) return {ok:false, reason:'No valid D1 setup'};
 
-  const range = d1Signal.range;
-  let sweepCandle = null;
-  const lookback = 192; // M15 lookback (~2 days * 24h *4)
-  for(let i = closed.length - 1; i >= Math.max(0, closed.length - lookback); i--){
-    const c = closed[i];
-    const sweepHigh = c.h > range.high;
-    const sweepLow = c.l < range.low;
-    const closeInside = c.c < range.high && c.c > range.low;
-    if(d1Signal.side === 'BUY' && sweepLow && closeInside){ sweepCandle = c; break; }
-    if(d1Signal.side === 'SELL' && sweepHigh && closeInside){ sweepCandle = c; break; }
-  }
-  if(!sweepCandle) return {ok:false, reason:'M15 needs sweep + close back inside D1 range.'};
-
   const fvg = detectFVG(closed);
   const ob = detectOB(closed, d1Signal.side);
   const zone = fvg.zone || ob;
-  if(!zone) return {ok:false, reason:'Waiting for M15 OB/FVG zone after sweep.'};
+  if(!zone) return {ok:false, reason:'Waiting for M15 OB/FVG entry zone after D1 validation.'};
 
   const last = closed[closed.length-1];
   const intersects = last.l <= zone.high && last.h >= zone.low;
@@ -2952,7 +2928,7 @@ function confirmM15WithD1(m15Data, d1Signal){
   if(d1Signal.side === 'BUY' && !isDiscount) return {ok:false, reason:'Entry must retest DISCOUNT zone.'};
   if(d1Signal.side === 'SELL' && !isPremium) return {ok:false, reason:'Entry must retest PREMIUM zone.'};
 
-  return {ok:true, reason:'M15 confirmed D1 CRT', zone, sweep: sweepCandle, entry};
+  return {ok:true, reason:'M15 confirmed D1 CRT with OB/FVG entry zone.', zone, entry};
 }
 
 // Confirm a D1 CRT using H1 candles (H1 acts as the LTF confirmation for D1)
@@ -2961,23 +2937,10 @@ function confirmH1WithD1(h1Data, d1Signal){
   if(closed.length < 24) return {ok:false, reason:'Insufficient H1 data'};
   if(!d1Signal || d1Signal.status !== 'VALID CRT SETUP' || !d1Signal.range) return {ok:false, reason:'No valid D1 setup'};
 
-  const range = d1Signal.range;
-  let sweepCandle = null;
-  const lookback = 48; // H1 lookback (~2 days)
-  for(let i = closed.length - 1; i >= Math.max(0, closed.length - lookback); i--){
-    const c = closed[i];
-    const sweepHigh = c.h > range.high;
-    const sweepLow = c.l < range.low;
-    const closeInside = c.c < range.high && c.c > range.low;
-    if(d1Signal.side === 'BUY' && sweepLow && closeInside){ sweepCandle = c; break; }
-    if(d1Signal.side === 'SELL' && sweepHigh && closeInside){ sweepCandle = c; break; }
-  }
-  if(!sweepCandle) return {ok:false, reason:'H1 needs sweep + close back inside D1 range.'};
-
   const fvg = detectFVG(closed);
   const ob = detectOB(closed, d1Signal.side);
   const zone = fvg.zone || ob;
-  if(!zone) return {ok:false, reason:'Waiting for H1 OB/FVG zone after sweep.'};
+  if(!zone) return {ok:false, reason:'Waiting for H1 OB/FVG entry zone after D1 validation.'};
 
   const last = closed[closed.length-1];
   const intersects = last.l <= zone.high && last.h >= zone.low;
@@ -2990,7 +2953,7 @@ function confirmH1WithD1(h1Data, d1Signal){
   if(d1Signal.side === 'BUY' && !isDiscount) return {ok:false, reason:'Entry must retest DISCOUNT zone.'};
   if(d1Signal.side === 'SELL' && !isPremium) return {ok:false, reason:'Entry must retest PREMIUM zone.'};
 
-  return {ok:true, reason:'H1 confirmed D1 CRT', zone, sweep: sweepCandle, entry};
+  return {ok:true, reason:'H1 confirmed D1 CRT with OB/FVG entry zone.', zone, entry};
 }
 
 async function refreshDailyOutlooks(){
@@ -3017,7 +2980,8 @@ async function refreshDailyOutlooks(){
         const m = res.match(/\b(BUY|SELL|WAITING)\b/i);
         status = m ? m[1].toUpperCase() : res;
       } else if(res && res.status){
-        status = res.status;
+        const m = String(res.status).match(/\b(BUY|SELL|WAITING)\b/i);
+        status = m ? m[1].toUpperCase() : String(res.status).toUpperCase();
       }
       if(res && typeof res === 'object'){
         if(res.confirmed && Number.isFinite(Number(res.entry))) entryText = `Entry: ${Number(res.entry).toFixed(2)}`;
