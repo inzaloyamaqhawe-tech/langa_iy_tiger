@@ -1969,8 +1969,8 @@ async function refreshSetupViews(){
   // keep local in sync with merged server view so notification gating uses the same state users see
   saveSetups(list);
   const sortByLatest = (a,b)=>{
-    const ta = Number(a.resolvedAt || a.updatedAt || a.recordedTs || a.entryTs || 0);
-    const tb = Number(b.resolvedAt || b.updatedAt || b.recordedTs || b.entryTs || 0);
+    const ta = Number(a.recordedTs || a.entryTs || 0);
+    const tb = Number(b.recordedTs || b.entryTs || 0);
     return tb - ta;
   };
   const success = list.filter(s=>s.status==='SUCCESS' && hasRealTp1Hit(s)).sort(sortByLatest);
@@ -1981,7 +1981,7 @@ async function refreshSetupViews(){
     return Number.isFinite(n) ? n.toFixed(2) : '—';
   }
   function displayTime(s){
-    const ts = Number(s.resolvedAt || s.updatedAt || s.recordedTs || s.entryTs || 0);
+    const ts = Number(s.recordedTs || s.entryTs || 0);
     return ts ? new Date(ts).toLocaleString([], {
       year: 'numeric',
       month: '2-digit',
@@ -2018,7 +2018,7 @@ async function refreshSetupViews(){
     });
     const slColor = mode === 'fail' ? '#ef4444' : '#6b7280';
     const when = displayTime(s);
-    return `${tpParts.join(' • ')} • <span style="color:${slColor}">SL: ${fmt2(s.sl)} • ${when}</span>`;
+    return `${tpParts.join(' • ')} • <span style="color:${slColor}">SL: ${fmt2(s.sl)} • Posted: ${when}</span>`;
   }
   function formatSetupCard(s, mode){
     const side = (s.side||'').toUpperCase();
@@ -2229,7 +2229,7 @@ function buildSetupReasonHtml(s){
   const ltfType = getLtfConfirmationTypeText(ltfReasonRaw);
   const entry = priceText(s.entry);
   const confluences = getSetupConfluences(s, setupType, ltfType);
-  const ltfConfirmAt = formatDateTime(s.ltfConfirmTs || s.entryTs || s.recordedTs);
+  const ltfConfirmAt = formatDateTime(s.recordedTs || s.entryTs);
   const ltfZoneText = (s.ltfZone && Number.isFinite(Number(s.ltfZone.low)) && Number.isFinite(Number(s.ltfZone.high)))
     ? `${priceText(s.ltfZone.low)} to ${priceText(s.ltfZone.high)}`
     : 'not captured';
