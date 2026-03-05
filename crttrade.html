@@ -444,7 +444,7 @@ function drawMainChart(updateOnly=false){
   const canvasEl = getEl('mainChart');
   if(!canvasEl) return;
   const ctx = canvasEl.getContext('2d');
-  const d = RUNTIME.history;
+  const d = (Array.isArray(RUNTIME.historyH1) && RUNTIME.historyH1.length) ? RUNTIME.historyH1 : RUNTIME.history;
   if(!d || !d.length) return;
   const labels = d.map(x=>x.t);
   const candlesticks = d.map(x=>({x:x.t, o:x.o, h:x.h, l:x.l, c:x.c}));
@@ -991,9 +991,10 @@ function analyzeCRTWithData(data, opts={}){
     return {status:'INVALID CRT', side:'—', reason:staleReason, details:[]};
   }
 
-  // Relaxed CRT scoring: evaluate multiple checks and require a minimum
-  // proportion (60%) to be true. However, C2 MUST close back inside C1's
-  // range for any valid CRT (this is mandatory per user request).
+  // Strict CRT definition (user rule):
+  // C1 = strong body with little/no wicks (accumulation/reference)
+  // C2 = sweeps above C1 high OR below C1 low, then closes back inside C1 range (manipulation)
+  // C3 = distribution/entry phase (handled by LTF entry confirmation)
   const crh = c1.h;
   const crl = c1.l;
   const mid = (crh + crl) / 2;
@@ -1002,70 +1003,59 @@ function analyzeCRTWithData(data, opts={}){
   details.push(`H1 C1 (Reference, 2nd last CLOSED) @ ${new Date(c1.t).toLocaleString()} — CRH: ${crh.toFixed(2)} • CRL: ${crl.toFixed(2)} • Mid: ${mid.toFixed(2)}`);
   details.push(`H1 C2 (Manipulation, last CLOSED) @ ${new Date(c2.t).toLocaleString()} — O:${c2.o.toFixed(2)} H:${c2.h.toFixed(2)} L:${c2.l.toFixed(2)} C:${c2.c.toFixed(2)}`);
 
-  const sweepInfo = isSweepWithTolerance(c2, crh, crl, 0.02);
-  let sweepHigh = sweepInfo.sweepHigh;
-  let sweepLow = sweepInfo.sweepLow;
+  const c1Range = Math.max(1e-9, crh - crl);
+  const c1Body = Math.abs(c1.c - c1.o);
+  const c1BodyPct = c1Body / c1Range;
+  const c1UpperWick = (c1.h - Math.max(c1.o, c1.c)) / c1Range;
+  const c1LowerWick = (Math.min(c1.o, c1.c) - c1.l) / c1Range;
+  const c1TotalWick = Math.max(0, c1Range - c1Body);
+  const c1WickBodyRatio = c1Body > 1e-9 ? (c1TotalWick / c1Body) : Number.POSITIVE_INFINITY;
+  const c1IsDoji = isDojiCandle(c1, 0.1);
+  const c1HammerType = hammerDirection(c1);
+  const c1Strong = c1BodyPct >= 0.6 && c1UpperWick <= 0.2 && c1LowerWick <= 0.2;
+  const c1LongBalanced = c1Range >= 10 && c1BodyPct >= 0.35 && c1BodyPct <= 0.65 && c1WickBodyRatio >= 0.7 && c1WickBodyRatio <= 1.3;
+  const c1ValidProfile = c1Strong || c1LongBalanced;
+
+  const sweepHigh = c2.h > crh;
+  const sweepLow = c2.l < crl;
+  const sweepInfo = {
+    sweepHigh,
+    sweepLow,
+    highEx: (c2.h - crh) / c1Range,
+    lowEx: (crl - c2.l) / c1Range
+  };
   const closeInside = c2.c < crh && c2.c > crl;
   const closeOutside = c2.c > crh || c2.c < crl;
   details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
+  details.push(`C1 strength: body ${(c1BodyPct*100).toFixed(1)}%, upper wick ${(c1UpperWick*100).toFixed(1)}%, lower wick ${(c1LowerWick*100).toFixed(1)}%`);
+  details.push(`C1 profile: strong=${c1Strong ? 'YES' : 'NO'} • long-balanced=${c1LongBalanced ? 'YES' : 'NO'} (H-L=${c1Range.toFixed(2)})`);
 
-  // Hard rule 1: if HTF C2 closes beyond C1 range, CRT is INVALID.
-  if(closeOutside){
-    return {status:'INVALID CRT', side:'—', reason:'C2 closed beyond C1 range (hard invalidation).', details, range:{high:crh, low:crl, mid}};
+  if(c1IsDoji){
+    return {status:'INVALID CRT', side:'—', reason:'C1 is doji: no entry.', details, range:{high:crh, low:crl, mid}};
+  }
+  if(c1HammerType){
+    return {status:'INVALID CRT', side:'—', reason:'C1 is hammer-type candle: no entry.', details, range:{high:crh, low:crl, mid}};
   }
 
-  // Hard rule 2: if any candle between C1 and C2 is doji, CRT is INVALID.
-  const between = closed.slice(c1Index + 1, c2Index);
-  if(between.some(c => isDojiCandle(c, 0.1))){
-    return {status:'INVALID CRT', side:'—', reason:'Doji detected between C1 and C2 (hard invalidation).', details, range:{high:crh, low:crl, mid}};
+  if(!c1ValidProfile){
+    return {status:'INVALID CRT', side:'—', reason:'C1 must be either strong-body/minimal-wicks or long-balanced (H-L >= 10).', details, range:{high:crh, low:crl, mid}};
   }
-
-  // Hard rule 3: if C1 and C2 are hammers with opposite wick direction, CRT is INVALID.
-  const c1Hammer = hammerDirection(c1);
-  const c2Hammer = hammerDirection(c2);
-  if(c1Hammer && c2Hammer && c1Hammer !== c2Hammer){
-    return {status:'INVALID CRT', side:'—', reason:'C1/C2 opposite-direction hammer rejection (hard invalidation).', details, range:{high:crh, low:crl, mid}};
-  }
-
-  // handle ambiguous dual-sweep by preferring dominant sweep if clear
-  if(sweepHigh && sweepLow){
-    const dominant = (sweepInfo.highEx > sweepInfo.lowEx) ? 'HIGH' : 'LOW';
-    if(Math.abs(sweepInfo.highEx - sweepInfo.lowEx) < 0.015){
-      // ambiguous — count this as a negative for sweep quality but continue
-      sweepHigh = false; sweepLow = false;
-    } else if(dominant === 'HIGH') { sweepHigh = true; sweepLow = false; }
-    else { sweepLow = true; sweepHigh = false; }
-  }
-
-  // compute checks (closeInside is mandatory)
-  const checks = [];
-  const impulseOk = isCleanImpulse(c1);
-  const compressionOk = precededByCompression(closed);
-  const sweepOk = (sweepHigh || sweepLow);
-  const crosses = countMidpointCrosses(closed, mid, 12);
-  const midpointOk = crosses < 4;
-  checks.push(impulseOk, compressionOk, sweepOk, midpointOk, closeInside);
-
-  const passed = checks.filter(Boolean).length;
-  const total = checks.length;
-  const pct = passed / total;
-
-  details.push(`CRT score: ${passed}/${total} (${Math.round(pct*100)}%) — C2 must close inside; currently ${closeInside ? 'OK' : 'NOT OK'}`);
-
-  // require C2 to close inside as mandatory, and at least 60% of checks true
   if(!closeInside){
-    return {status:'INVALID CRT', side:'—', reason:'C2 did not close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
+    return {status:'INVALID CRT', side:'—', reason:'C2 must close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
   }
-  if(pct < 0.6){
-    return {status:'WAITING', side:'—', reason:`CRT checks insufficient (${passed}/${total}).`, details, range:{high:crh, low:crl, mid}};
+  if(!sweepHigh && !sweepLow){
+    return {status:'INVALID CRT', side:'—', reason:'C2 must sweep above C1 high or below C1 low.', details, range:{high:crh, low:crl, mid}};
+  }
+  if(sweepHigh && sweepLow){
+    return {status:'WAITING', side:'—', reason:'C2 swept both sides; waiting for clearer directional sweep.', details, range:{high:crh, low:crl, mid}};
   }
 
   const side = sweepHigh ? 'SELL' : 'BUY';
   const reason = sweepHigh
-    ? 'Valid CRT: C2 swept above CRH and closed back inside range.'
-    : 'Valid CRT: C2 swept below CRL and closed back inside range.';
+    ? 'Valid CRT: C1 strong body; C2 swept above C1 high and closed back inside. C3 is distribution/entry phase.'
+    : 'Valid CRT: C1 strong body; C2 swept below C1 low and closed back inside. C3 is distribution/entry phase.';
 
-  details.push('HTF focus: C1 defines range, C2 validates CRT.');
+  details.push('HTF focus: C1 defines range, C2 validates sweep-and-closeback, C3 is distribution/entry zone.');
 
   return {
     status:'VALID CRT SETUP',
@@ -1073,7 +1063,7 @@ function analyzeCRTWithData(data, opts={}){
     reason,
     details,
     range: {high:crh, low:crl, mid},
-    scorePct: pct,
+    scorePct: 1,
     sweepInfo,
     ref: c1,
     manip: c2
@@ -1516,7 +1506,7 @@ async function applyCachedSignalIfValid(symbol){
   if(RUNTIME.symbol === symbol){
     RUNTIME.historyH1 = h1;
     RUNTIME.historyM5 = m5;
-    RUNTIME.history = m5;
+    RUNTIME.history = RUNTIME.historyH1;
     drawMainChart(true);
     updateLiveAndCRT(true);
   }
@@ -2830,7 +2820,7 @@ async function checkAllAssetsSignals(){
     if(symbol === RUNTIME.symbol){
       RUNTIME.historyH1 = h1;
       RUNTIME.historyM5 = m5;
-      RUNTIME.history = m5;
+      RUNTIME.history = RUNTIME.historyH1;
       drawMainChart(true);
       updateLiveAndCRT(true);
     }
