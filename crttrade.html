@@ -1037,6 +1037,9 @@ function analyzeCRTWithData(data, opts={}){
   details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
   details.push(`C1 strength: body ${(c1BodyPct*100).toFixed(1)}%, upper wick ${(c1UpperWick*100).toFixed(1)}%, lower wick ${(c1LowerWick*100).toFixed(1)}%`);
   details.push(`C1 profile: H-L>=10=${c1RangeQualified ? 'YES' : 'NO'} • body>=40%=${c1BodyQualified ? 'YES' : 'NO'} (H-L=${c1Range.toFixed(2)}, total wick ${(c1TotalWick / c1Range * 100).toFixed(1)}%)`);
+  if(c1RangeQualified && !c1BodyQualified){
+    details.push('C1 accepted by long-range rule: long-wick candle treated as possible liquidity manipulation with expected later fill.');
+  }
 
   if(!c1ValidProfile){
     return {status:'INVALID CRT', side:'—', reason:'C1 invalid: require either H-L >= 10, or body >= 40% when H-L < 10.', details, range:{high:crh, low:crl, mid}};
