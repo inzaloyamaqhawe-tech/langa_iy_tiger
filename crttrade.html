@@ -1020,12 +1020,9 @@ function analyzeCRTWithData(data, opts={}){
   const c1UpperWick = (c1.h - Math.max(c1.o, c1.c)) / c1Range;
   const c1LowerWick = (Math.min(c1.o, c1.c) - c1.l) / c1Range;
   const c1TotalWick = Math.max(0, c1Range - c1Body);
-  const c1WickBodyRatio = c1Body > 1e-9 ? (c1TotalWick / c1Body) : Number.POSITIVE_INFINITY;
-  const c1IsDoji = isDojiCandle(c1, 0.1);
-  const c1HammerType = hammerDirection(c1);
-  const c1Strong = c1BodyPct >= 0.6;
-  const c1LongBalanced = c1BodyPct >= 0.4;
-  const c1ValidProfile = c1Strong || c1LongBalanced;
+  const c1RangeQualified = c1Range >= 10;
+  const c1BodyQualified = c1BodyPct >= 0.4;
+  const c1ValidProfile = c1RangeQualified || c1BodyQualified;
 
   const sweepHigh = c2.h > crh;
   const sweepLow = c2.l < crl;
@@ -1039,17 +1036,10 @@ function analyzeCRTWithData(data, opts={}){
   const closeOutside = c2.c > crh || c2.c < crl;
   details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
   details.push(`C1 strength: body ${(c1BodyPct*100).toFixed(1)}%, upper wick ${(c1UpperWick*100).toFixed(1)}%, lower wick ${(c1LowerWick*100).toFixed(1)}%`);
-  details.push(`C1 profile: strong=${c1Strong ? 'YES' : 'NO'} • fair-body(>=40%)=${c1LongBalanced ? 'YES' : 'NO'} (H-L=${c1Range.toFixed(2)}, total wick ${(c1TotalWick / c1Range * 100).toFixed(1)}%)`);
-
-  if(c1IsDoji){
-    return {status:'INVALID CRT', side:'—', reason:'C1 is doji: no entry.', details, range:{high:crh, low:crl, mid}};
-  }
-  if(c1HammerType){
-    return {status:'INVALID CRT', side:'—', reason:'C1 is hammer-type candle: no entry.', details, range:{high:crh, low:crl, mid}};
-  }
+  details.push(`C1 profile: H-L>=10=${c1RangeQualified ? 'YES' : 'NO'} • body>=40%=${c1BodyQualified ? 'YES' : 'NO'} (H-L=${c1Range.toFixed(2)}, total wick ${(c1TotalWick / c1Range * 100).toFixed(1)}%)`);
 
   if(!c1ValidProfile){
-    return {status:'INVALID CRT', side:'—', reason:'C1 body must be at least 40% of candle range (doji/hammer excluded).', details, range:{high:crh, low:crl, mid}};
+    return {status:'INVALID CRT', side:'—', reason:'C1 invalid: require either H-L >= 10, or body >= 40% when H-L < 10.', details, range:{high:crh, low:crl, mid}};
   }
   if(!closeInside){
     return {status:'INVALID CRT', side:'—', reason:'C2 must close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
