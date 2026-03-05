@@ -158,6 +158,10 @@
             <div>
               <label class="small">Timeframes</label>
               <div class="input mt-2">H1 (setup) → M5 (confirmation)</div>
+              <div class="flex gap-2 mt-2">
+                <button id="btnViewH1_view" class="btn btn-navy">H1 View</button>
+                <button id="btnViewM5_view" class="btn btn-black">M5 View</button>
+              </div>
             </div>
             <div>
               <label class="small">Chart Type</label>
@@ -286,6 +290,8 @@ const liveInfoEl = getEl('liveInfo');
 const candleCloseInfoEl = getEl('candleCloseInfo');
 const btnCandle = getEl('btnCandle');
 const btnLine = getEl('btnLine');
+const btnViewH1 = getEl('btnViewH1');
+const btnViewM5 = getEl('btnViewM5');
 // const btnReanalyse = getEl('btnReanalyse');
 const btnEnableNotifications = getEl('btnEnableNotifications');
 const crtStatusEl = getEl('crtStatus');
@@ -306,6 +312,7 @@ let RUNTIME = {
   CORS_PROXY: '',
   symbol: 'PAXGUSDT',
   interval: '5m',
+  frontendTf: '1h',
   chartType: 'candlestick',
   history: [],
   historyH1: [],
@@ -444,7 +451,9 @@ function drawMainChart(updateOnly=false){
   const canvasEl = getEl('mainChart');
   if(!canvasEl) return;
   const ctx = canvasEl.getContext('2d');
-  const d = Array.isArray(RUNTIME.historyH1) ? RUNTIME.historyH1 : [];
+  const d = RUNTIME.frontendTf === '5m'
+    ? (Array.isArray(RUNTIME.historyM5) ? RUNTIME.historyM5 : [])
+    : (Array.isArray(RUNTIME.historyH1) ? RUNTIME.historyH1 : []);
   if(!d || !d.length) return;
   const labels = d.map(x=>x.t);
   const candlesticks = d.map(x=>({x:x.t, o:x.o, h:x.h, l:x.l, c:x.c}));
@@ -755,8 +764,8 @@ function connectWS(){
       } else {
         RUNTIME.historyH1[RUNTIME.historyH1.length-1] = candle;
       }
-      RUNTIME.history = RUNTIME.historyH1;
-      drawMainChart(true);
+      RUNTIME.history = (RUNTIME.frontendTf === '5m') ? RUNTIME.historyM5 : RUNTIME.historyH1;
+      if(RUNTIME.frontendTf === '1h') drawMainChart(true);
       updateLiveAndCRT(false);
     }catch(e){ console.error('ws parse H1', e); }
   };
@@ -774,6 +783,8 @@ function connectWS(){
       } else {
         RUNTIME.historyM5[RUNTIME.historyM5.length-1] = candle;
       }
+      RUNTIME.history = (RUNTIME.frontendTf === '5m') ? RUNTIME.historyM5 : RUNTIME.historyH1;
+      if(RUNTIME.frontendTf === '5m') drawMainChart(true);
       updateLiveAndCRT(false);
     }catch(e){ console.error('ws parse M5', e); }
   };
@@ -1419,15 +1430,18 @@ async function updateLiveAndCRT(force=false){
   const dH1 = RUNTIME.historyH1;
   const dM5 = RUNTIME.historyM5;
   if(!dH1 || !dH1.length) return;
-  const lastH1 = dH1[dH1.length-1];
-  const livePx = (dM5 && dM5.length) ? dM5[dM5.length-1].c : lastH1.c;
-  liveInfoEl.innerText = `Live price: ${livePx.toFixed(6)} • Last H1 candle: ${new Date(lastH1.t).toLocaleString()}`;
-  const closeAt = new Date(lastH1.t + intervalToMs('1h'));
+  const viewTf = RUNTIME.frontendTf === '5m' ? '5m' : '1h';
+  const viewData = viewTf === '5m' ? dM5 : dH1;
+  if(!viewData || !viewData.length) return;
+  const lastView = viewData[viewData.length-1];
+  const livePx = (dM5 && dM5.length) ? dM5[dM5.length-1].c : lastView.c;
+  liveInfoEl.innerText = `Live price: ${livePx.toFixed(6)} • Last ${viewTf.toUpperCase()} candle: ${new Date(lastView.t).toLocaleString()}`;
+  const closeAt = new Date(lastView.t + intervalToMs(viewTf));
   const remaining = closeAt.getTime() - Date.now();
-  candleCloseInfoEl.innerText = `H1 candle closes in: ${formatCountdown(remaining)} (at ${closeAt.toLocaleTimeString()})`;
+  candleCloseInfoEl.innerText = `${viewTf.toUpperCase()} candle closes in: ${formatCountdown(remaining)} (at ${closeAt.toLocaleTimeString()})`;
 
-  // Recent HTF candles only
-  const recent = dH1.slice(-12).reverse();
+  // Recent candles from selected frontend timeframe
+  const recent = viewData.slice(-12).reverse();
   candleListEl.innerHTML = recent.map(r=>`<div><strong>${new Date(r.t).toLocaleString()}</strong> — O:${r.o} H:${r.h} L:${r.l} C:${r.c}</div>`).join('');
 
   if(isBrokerWeekendClosed()){
@@ -2858,6 +2872,23 @@ async function checkAllAssetsSignals(){
 symbolSelectEl.addEventListener('change', onSymbolChange);
 btnCandle.addEventListener('click', ()=>{ RUNTIME.chartType='candlestick'; drawMainChart(false); });
 btnLine.addEventListener('click', ()=>{ RUNTIME.chartType='line'; drawMainChart(false); });
+
+function setFrontendTf(tf){
+  RUNTIME.frontendTf = (tf === '5m') ? '5m' : '1h';
+  RUNTIME.interval = RUNTIME.frontendTf;
+  if(intervalTextEl) intervalTextEl.innerText = RUNTIME.frontendTf === '5m' ? 'M5 (frontend view)' : 'H1 (frontend view)';
+  if(btnViewH1 && btnViewM5){
+    btnViewH1.className = `btn ${RUNTIME.frontendTf === '1h' ? 'btn-navy' : 'btn-black'}`;
+    btnViewM5.className = `btn ${RUNTIME.frontendTf === '5m' ? 'btn-navy' : 'btn-black'}`;
+  }
+  RUNTIME.history = (RUNTIME.frontendTf === '5m') ? RUNTIME.historyM5 : RUNTIME.historyH1;
+  RUNTIME.userZoomed = false;
+  drawMainChart(false);
+  updateLiveAndCRT(true);
+}
+
+if(btnViewH1) btnViewH1.addEventListener('click', ()=> setFrontendTf('1h'));
+if(btnViewM5) btnViewM5.addEventListener('click', ()=> setFrontendTf('5m'));
 // Manual re-scan removed. Scanning is automatic for all assets (see scanAllSymbols below).
 btnEnableNotifications.addEventListener('click', async ()=>{
   if(!('Notification' in window)){
@@ -2969,15 +3000,15 @@ async function onSymbolChange(){
   try{ if(RUNTIME.wsM5) RUNTIME.wsM5.close(); }catch(e){}
   RUNTIME.symbol = symbolSelectEl.value;
   RUNTIME.userZoomed = false;
-  RUNTIME.interval = '1h';
+  RUNTIME.interval = RUNTIME.frontendTf;
   titleEl.innerText = `${symbolLabel()} `;
-  intervalTextEl.innerText = 'H1 (HTF chart)';
+  intervalTextEl.innerText = RUNTIME.frontendTf === '5m' ? 'M5 (frontend view)' : 'H1 (frontend view)';
   const h1 = await fetchHistorical(RUNTIME.symbol, '1h', 600);
   const m5 = await fetchHistorical(RUNTIME.symbol, '5m', 600);
   if(!h1 || !m5){ alert('Failed to fetch historical for ' + symbolLabel()); return; }
   RUNTIME.historyH1 = h1;
   RUNTIME.historyM5 = m5;
-  RUNTIME.history = RUNTIME.historyH1;
+  RUNTIME.history = (RUNTIME.frontendTf === '5m') ? RUNTIME.historyM5 : RUNTIME.historyH1;
   drawMainChart(false);
   updateLiveAndCRT(false);
   connectWS();
@@ -2990,6 +3021,7 @@ async function onSymbolChange(){
   applyCachedSignalIfValid(RUNTIME.symbol);
 }
 
+setFrontendTf('1h');
 onSymbolChange();
 window.addEventListener('beforeunload', ()=>{
   try{ if(RUNTIME.wsH1) RUNTIME.wsH1.close(); }catch(e){}
