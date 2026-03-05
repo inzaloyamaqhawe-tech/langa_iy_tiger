@@ -337,7 +337,7 @@ const NOTIFY = {
 if(window.Notification && Notification.permission === 'granted'){
   NOTIFY.enabled = true;
 }
-const NOTIFY_COOLDOWN_MS = 60 * 1000;
+const NOTIFY_COOLDOWN_MS = 125 * 1000;
 const SIGNAL_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 function setText(el, txt){ if(el) el.innerText = txt; }
@@ -1470,6 +1470,18 @@ function hasRealTp1Hit(setup){
   return hh.some(h => h && h.type && /^TP1$/i.test(String(h.type)));
 }
 
+function hasSlHit(setup){
+  const hh = Array.isArray(setup && setup.hitHistory) ? setup.hitHistory : (Array.isArray(setup && setup.hit_history) ? setup.hit_history : []);
+  return hh.some(h => h && h.type && /^SL$/i.test(String(h.type))) || /^SL$/i.test(String(setup && setup.reason ? setup.reason : ''));
+}
+
+function isSetupActiveForNotify(setup){
+  if(!setup) return false;
+  if(hasRealTp1Hit(setup)) return false;
+  if(hasSlHit(setup)) return false;
+  return setup.status === 'PENDING' || setup.status === 'SUCCESS';
+}
+
 function applySetupLifecycleRecovery(list){
   if(!Array.isArray(list) || !list.length) return;
   const lifecycle = loadLifecycleMap();
@@ -1506,15 +1518,12 @@ function applySetupLifecycleRecovery(list){
     }
 
     // Recovery catch-up: setup resolved before this device ever saw pending.
+    // Policy: do not notify resolved outcomes (TP1/SL). Notifications are pending-only.
     if((s.status === 'SUCCESS' || s.status === 'FAILED') && !state.seenPending && !state.notifiedRecovery){
-      const side = (s.side || 'WAIT').toUpperCase();
-      const symbol = getLabelFor(s.symbol || 'PAXGUSDT');
-      const outcome = s.status === 'SUCCESS' ? 'WON' : 'LOST (SL)';
-      notifyUser(s.symbol || 'PAXGUSDT', `SETUP RECOVERED (${outcome}) — ${symbol}`, `This setup resolved before pending was seen on this device.\nSide: ${side}`, { force: true });
       state.notifiedRecovery = true;
       state.notifiedSignal = true;
       changed = true;
-      console.log('[LIFECYCLE NOTIFY RECOVERY]', { id, status: s.status, side: s.side, symbol: s.symbol });
+      console.log('[LIFECYCLE RESOLVED NO-NOTIFY]', { id, status: s.status, side: s.side, symbol: s.symbol });
     }
 
     if(state.lastStatus !== s.status){
@@ -2543,6 +2552,18 @@ async function monitorSetups(){
       const all = loadSetups();
       const idx = all.findIndex(x=>x.id === s.id);
       if(idx !== -1) { all[idx] = s; localStorage.setItem(SETUP_STORAGE_KEY, JSON.stringify(normalizeSetupsArray(all))); }
+
+      if(isSetupActiveForNotify(s)){
+        const side = (s.side || 'WAIT').toUpperCase();
+        const symbolLabel = getLabelFor(s.symbol || 'PAXGUSDT');
+        const entry = Number(s.entry);
+        const sl = Number(s.sl);
+        const tp1 = Number(s.tp1);
+        const eTxt = Number.isFinite(entry) ? entry.toFixed(2) : '—';
+        const slTxt = Number.isFinite(sl) ? sl.toFixed(2) : '—';
+        const tp1Txt = Number.isFinite(tp1) ? tp1.toFixed(2) : '—';
+        notifyUser(s.symbol || 'PAXGUSDT', `SETUP ACTIVE (${side}) — ${symbolLabel}`, `Entry: ${eTxt} | SL: ${slTxt} | TP1: ${tp1Txt}\nStill pending (no TP1/SL hit).`);
+      }
     }catch(e){ console.warn('monitor error', e); }
   }
   refreshSetupViews();
@@ -2755,12 +2776,7 @@ async function checkAllAssetsSignals(){
       continue;
     }
 
-    // Hard gate: notify only after setup is actually visible in pending list state
-    const visible = await waitForPendingVisibility(canonicalId, 6, 350);
-    if(!visible){
-      console.warn('Skipping notify: setup not visible in pending after DB post', canonicalId);
-      continue;
-    }
+    // Notify immediately after DB post so users get entry timing without waiting for UI refresh.
 
     const tpListText = [tp1, tp2, tp3, tp4, tp5].filter(x=>x!=null).map(x=> (typeof x === 'number' ? x.toFixed(2) : x)).join(' / ');
     const tp6Text = tp6 ? (typeof tp6 === 'number' ? tp6.toFixed(2) : tp6) : '—';
@@ -3073,7 +3089,7 @@ function startBackgroundScanner(){
   if(window._bgScanner) clearInterval(window._bgScanner);
   // immediate run
   checkAllAssetsSignals();
-  // repeat every 125 seconds (light refresh of entries/setups)
+  // repeat every 125 seconds to avoid notification pressure on mobile
   window._bgScanner = setInterval(checkAllAssetsSignals, 125 * 1000);
 }
 
