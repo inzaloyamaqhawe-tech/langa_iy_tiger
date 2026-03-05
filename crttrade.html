@@ -444,7 +444,7 @@ function drawMainChart(updateOnly=false){
   const canvasEl = getEl('mainChart');
   if(!canvasEl) return;
   const ctx = canvasEl.getContext('2d');
-  const d = (Array.isArray(RUNTIME.historyH1) && RUNTIME.historyH1.length) ? RUNTIME.historyH1 : RUNTIME.history;
+  const d = Array.isArray(RUNTIME.historyH1) ? RUNTIME.historyH1 : [];
   if(!d || !d.length) return;
   const labels = d.map(x=>x.t);
   const candlesticks = d.map(x=>({x:x.t, o:x.o, h:x.h, l:x.l, c:x.c}));
@@ -1329,7 +1329,6 @@ function updateCRTUI(h1Crt, m5Confirm){
       tp3 = (tp3Raw && (h1Crt.side === 'BUY' ? tp3Raw > tp2 : tp3Raw < tp2)) ? tp3Raw : null;
     }
 
-    const zone = m5Confirm.zone ? `${m5Confirm.zone.low.toFixed(2)} → ${m5Confirm.zone.high.toFixed(2)}` : 'Waiting';
     const sl = getFixedSL(symbol, entry, h1Crt.side);
 
     // If we already have server-authoritative HTML for this symbol, prefer it
@@ -1341,7 +1340,7 @@ function updateCRTUI(h1Crt, m5Confirm){
       `SL: ${sl ? sl.toFixed(2) : 'Waiting'}<br/>`+
       `TP1 (>=20 pips): ${tp1.toFixed(2)} • TP2 (>=40 pips): ${tp2.toFixed(2)}<br/>`+
       `TP3: ${tp3 ? tp3.toFixed(2) : 'Waiting'} • TP4: ${tp4 ? tp4.toFixed(2) : '—'} • TP5: ${tp5 ? tp5.toFixed(2) : '—'} • TP6 (Liquidity/OB): ${tp6 ? tp6.toFixed(2) : 'Waiting'}<br/>`+
-      `M5 Entry Zone: ${zone}`
+      `HTF focus only: C1 range, C2 sweep-closeback, C3 distribution`
       );
     }
     if(m5Confirm.ok){
@@ -1389,15 +1388,13 @@ function updateCRTUI(h1Crt, m5Confirm){
       const tp4 = s.tp4 || (s.setup && s.setup.tp4) || null;
       const tp5 = s.tp5 || (s.setup && s.setup.tp5) || null;
       const tp6 = s.tp6 || (s.setup && s.setup.tp6) || null;
-      const zone = (s.zone && (s.zone.low && s.zone.high)) ? `${s.zone.low.toFixed(2)} → ${s.zone.high.toFixed(2)}` : (m5Confirm && m5Confirm.zone ? `${m5Confirm.zone.low.toFixed(2)} → ${m5Confirm.zone.high.toFixed(2)}` : 'Waiting');
-
       const html = `HTF Range: ${h1Crt.range ? (h1Crt.range.low.toFixed(2) + ' → ' + h1Crt.range.high.toFixed(2)) : '—'}<br/>`+
         `Entry (Zone Mid): ${entry ? Number(entry).toFixed(2) : '—'}<br/>`+
         `SL: ${sl ? Number(sl).toFixed(2) : '—'}<br/>`+
         `TP1: ${tp1 ? Number(tp1).toFixed(2) : '—'} • TP2: ${tp2 ? Number(tp2).toFixed(2) : '—'}<br/>`+
         `TP3: ${tp3 ? Number(tp3).toFixed(2) : '—'} • TP4: ${tp4 ? Number(tp4).toFixed(2) : '—'} • TP5: ${tp5 ? Number(tp5).toFixed(2) : '—'} • TP6: ${tp6 ? Number(tp6).toFixed(2) : '—'}<br/>`+
         `Status: ${s.status || 'PENDING'} • Recorded: ${s.recordedTs ? new Date(s.recordedTs).toLocaleString() : '—'}<br/>`+
-        `M5 Entry Zone: ${zone}`;
+        `HTF focus only: C1 range, C2 sweep-closeback, C3 distribution`;
 
       if(html !== (RUNTIME.lastServerDetailsHtml || '')){
         setHTML(crtDetailsEl, html);
@@ -1419,16 +1416,18 @@ function getLabelFor(sym){
 }
 
 async function updateLiveAndCRT(force=false){
-  const d = RUNTIME.historyM5;
-  if(!d || !d.length) return;
-  const last = d[d.length-1];
-  liveInfoEl.innerText = `Live price: ${last.c.toFixed(6)} • Last candle: ${new Date(last.t).toLocaleString()}`;
-  const closeAt = new Date(last.t + intervalToMs('5m'));
+  const dH1 = RUNTIME.historyH1;
+  const dM5 = RUNTIME.historyM5;
+  if(!dH1 || !dH1.length) return;
+  const lastH1 = dH1[dH1.length-1];
+  const livePx = (dM5 && dM5.length) ? dM5[dM5.length-1].c : lastH1.c;
+  liveInfoEl.innerText = `Live price: ${livePx.toFixed(6)} • Last H1 candle: ${new Date(lastH1.t).toLocaleString()}`;
+  const closeAt = new Date(lastH1.t + intervalToMs('1h'));
   const remaining = closeAt.getTime() - Date.now();
-  candleCloseInfoEl.innerText = `Candle closes in: ${formatCountdown(remaining)} (at ${closeAt.toLocaleTimeString()})`;
+  candleCloseInfoEl.innerText = `H1 candle closes in: ${formatCountdown(remaining)} (at ${closeAt.toLocaleTimeString()})`;
 
-  // Recent candles
-  const recent = d.slice(-12).reverse();
+  // Recent HTF candles only
+  const recent = dH1.slice(-12).reverse();
   candleListEl.innerHTML = recent.map(r=>`<div><strong>${new Date(r.t).toLocaleString()}</strong> — O:${r.o} H:${r.h} L:${r.l} C:${r.c}</div>`).join('');
 
   if(isBrokerWeekendClosed()){
