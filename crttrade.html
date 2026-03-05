@@ -1023,8 +1023,8 @@ function analyzeCRTWithData(data, opts={}){
   const c1WickBodyRatio = c1Body > 1e-9 ? (c1TotalWick / c1Body) : Number.POSITIVE_INFINITY;
   const c1IsDoji = isDojiCandle(c1, 0.1);
   const c1HammerType = hammerDirection(c1);
-  const c1Strong = c1BodyPct >= 0.6 && c1UpperWick <= 0.2 && c1LowerWick <= 0.2;
-  const c1LongBalanced = c1Range >= 10 && c1BodyPct >= 0.35 && c1BodyPct <= 0.65 && c1WickBodyRatio >= 0.7 && c1WickBodyRatio <= 1.3;
+  const c1Strong = c1BodyPct >= 0.6;
+  const c1LongBalanced = c1BodyPct >= 0.4;
   const c1ValidProfile = c1Strong || c1LongBalanced;
 
   const sweepHigh = c2.h > crh;
@@ -1039,7 +1039,7 @@ function analyzeCRTWithData(data, opts={}){
   const closeOutside = c2.c > crh || c2.c < crl;
   details.push(`C2 close status: ${closeInside ? 'CLOSED INSIDE range' : (closeOutside ? 'CLOSED OUTSIDE range' : 'ON RANGE EDGE')}`);
   details.push(`C1 strength: body ${(c1BodyPct*100).toFixed(1)}%, upper wick ${(c1UpperWick*100).toFixed(1)}%, lower wick ${(c1LowerWick*100).toFixed(1)}%`);
-  details.push(`C1 profile: strong=${c1Strong ? 'YES' : 'NO'} • long-balanced=${c1LongBalanced ? 'YES' : 'NO'} (H-L=${c1Range.toFixed(2)})`);
+  details.push(`C1 profile: strong=${c1Strong ? 'YES' : 'NO'} • fair-body(>=40%)=${c1LongBalanced ? 'YES' : 'NO'} (H-L=${c1Range.toFixed(2)}, total wick ${(c1TotalWick / c1Range * 100).toFixed(1)}%)`);
 
   if(c1IsDoji){
     return {status:'INVALID CRT', side:'—', reason:'C1 is doji: no entry.', details, range:{high:crh, low:crl, mid}};
@@ -1049,7 +1049,7 @@ function analyzeCRTWithData(data, opts={}){
   }
 
   if(!c1ValidProfile){
-    return {status:'INVALID CRT', side:'—', reason:'C1 must be either strong-body/minimal-wicks or long-balanced (H-L >= 10).', details, range:{high:crh, low:crl, mid}};
+    return {status:'INVALID CRT', side:'—', reason:'C1 body must be at least 40% of candle range (doji/hammer excluded).', details, range:{high:crh, low:crl, mid}};
   }
   if(!closeInside){
     return {status:'INVALID CRT', side:'—', reason:'C2 must close back inside C1 range.', details, range:{high:crh, low:crl, mid}};
