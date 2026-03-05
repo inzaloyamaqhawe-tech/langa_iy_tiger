@@ -482,13 +482,88 @@ function drawMainChart(updateOnly=false){
       : { id:'price', label:'Price', data: candlesticks, color: '#64748b', borderColor: '#475569', upColor:'#10b981', downColor:'#ef4444', borderUpColor:'#0f766e', borderDownColor:'#b91c1c' }
   ];
 
+  function drawHtfCrtOverlay(chart, ctx2){
+    try{
+      const h1 = Array.isArray(RUNTIME.historyH1) ? RUNTIME.historyH1 : [];
+      if(!h1.length) return;
+      const h1Crt = analyzeCRTWithData(h1, getStrictH1CrtOptions());
+      if(!h1Crt || h1Crt.status !== 'VALID CRT SETUP' || !h1Crt.range || !h1Crt.manip) return;
+
+      const yScale = chart.scales && chart.scales.y;
+      if(!yScale) return;
+      const area = chart.chartArea;
+      if(!area) return;
+
+      const crh = Number(h1Crt.range.high);
+      const crl = Number(h1Crt.range.low);
+      const eq = Number(h1Crt.range.mid);
+      const c2Close = Number(h1Crt.manip.c);
+      const c3 = h1[h1.length - 1];
+      const c3Close = c3 ? Number(c3.c) : NaN;
+      const zoneText = Number.isFinite(c3Close)
+        ? (c3Close > eq ? 'C3: PREMIUM' : (c3Close < eq ? 'C3: DISCOUNT' : 'C3: EQUILIBRIUM'))
+        : 'C3: —';
+
+      const yHigh = yScale.getPixelForValue(crh);
+      const yLow = yScale.getPixelForValue(crl);
+      const yEq = yScale.getPixelForValue(eq);
+      const yC2 = yScale.getPixelForValue(c2Close);
+
+      ctx2.save();
+      ctx2.lineWidth = 1.4;
+
+      // CRH
+      ctx2.setLineDash([]);
+      ctx2.strokeStyle = '#16a34a';
+      ctx2.beginPath();
+      ctx2.moveTo(area.left, yHigh);
+      ctx2.lineTo(area.right, yHigh);
+      ctx2.stroke();
+      ctx2.fillStyle = '#16a34a';
+      ctx2.font = '12px Manrope, sans-serif';
+      ctx2.fillText(`CRT HIGH (C1): ${crh.toFixed(2)}`, area.left + 8, yHigh - 6);
+
+      // CRL
+      ctx2.strokeStyle = '#dc2626';
+      ctx2.beginPath();
+      ctx2.moveTo(area.left, yLow);
+      ctx2.lineTo(area.right, yLow);
+      ctx2.stroke();
+      ctx2.fillStyle = '#dc2626';
+      ctx2.fillText(`CRT LOW (C1): ${crl.toFixed(2)}`, area.left + 8, yLow - 6);
+
+      // Equilibrium dotted
+      ctx2.setLineDash([6, 5]);
+      ctx2.strokeStyle = '#64748b';
+      ctx2.beginPath();
+      ctx2.moveTo(area.left, yEq);
+      ctx2.lineTo(area.right, yEq);
+      ctx2.stroke();
+      ctx2.fillStyle = '#475569';
+      ctx2.fillText(`EQ: ${eq.toFixed(2)} • ${zoneText}`, area.left + 8, yEq - 6);
+
+      // C2 close marker line
+      ctx2.setLineDash([3, 4]);
+      ctx2.strokeStyle = '#f59e0b';
+      ctx2.beginPath();
+      ctx2.moveTo(area.left, yC2);
+      ctx2.lineTo(area.right, yC2);
+      ctx2.stroke();
+      ctx2.fillStyle = '#f59e0b';
+      ctx2.fillText(`C2 CLOSE: ${c2Close.toFixed(2)}`, area.left + 8, yC2 - 6);
+
+      ctx2.restore();
+    }catch(e){ /* no-op overlay fail-safe */ }
+  }
+
   const candle3dPlugin = {
     id: 'candlestick3d',
     afterDatasetsDraw(chart){
+      const ctx2 = chart.ctx;
+      drawHtfCrtOverlay(chart, ctx2);
       if(chart.config.type !== 'candlestick') return;
       const meta = chart.getDatasetMeta(0);
       if(!meta || !meta.data) return;
-      const ctx2 = chart.ctx;
       ctx2.save();
       for(const el of meta.data){
         try{
@@ -680,6 +755,8 @@ function connectWS(){
       } else {
         RUNTIME.historyH1[RUNTIME.historyH1.length-1] = candle;
       }
+      RUNTIME.history = RUNTIME.historyH1;
+      drawMainChart(true);
       updateLiveAndCRT(false);
     }catch(e){ console.error('ws parse H1', e); }
   };
@@ -697,8 +774,6 @@ function connectWS(){
       } else {
         RUNTIME.historyM5[RUNTIME.historyM5.length-1] = candle;
       }
-      RUNTIME.history = RUNTIME.historyM5;
-      drawMainChart(true);
       updateLiveAndCRT(false);
     }catch(e){ console.error('ws parse M5', e); }
   };
@@ -2905,15 +2980,15 @@ async function onSymbolChange(){
   try{ if(RUNTIME.wsM5) RUNTIME.wsM5.close(); }catch(e){}
   RUNTIME.symbol = symbolSelectEl.value;
   RUNTIME.userZoomed = false;
-  RUNTIME.interval = '5m';
+  RUNTIME.interval = '1h';
   titleEl.innerText = `${symbolLabel()} `;
-  intervalTextEl.innerText = 'M5';
+  intervalTextEl.innerText = 'H1 (HTF chart)';
   const h1 = await fetchHistorical(RUNTIME.symbol, '1h', 600);
   const m5 = await fetchHistorical(RUNTIME.symbol, '5m', 600);
   if(!h1 || !m5){ alert('Failed to fetch historical for ' + symbolLabel()); return; }
   RUNTIME.historyH1 = h1;
   RUNTIME.historyM5 = m5;
-  RUNTIME.history = RUNTIME.historyM5;
+  RUNTIME.history = RUNTIME.historyH1;
   drawMainChart(false);
   updateLiveAndCRT(false);
   connectWS();
