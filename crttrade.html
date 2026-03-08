@@ -2109,7 +2109,7 @@ async function refreshSetupViews(){
   if(pendingEl) pendingEl.innerHTML = (pending.length ? pending.map(s=>formatSetupCard(s, 'pending')).join('') : '—');
   // Success rate counts only decided setups (SUCCESS or FAILED). Pending are ignored.
   const decided = (success.length || 0) + (fail.length || 0);
-  const successRate = decided ? Math.round((success.length / decided) * 100) : 0;
+  const successRate = decided ? ((success.length / decided) * 100).toFixed(2) : '0.00';
   document.getElementById('successRate').innerText = successRate + '%';
   const totalSetupsEl = document.getElementById('totalSetupsValue');
   const successfulSetupsEl = document.getElementById('successfulSetupsValue');
