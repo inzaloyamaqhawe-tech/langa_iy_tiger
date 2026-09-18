@@ -1,0 +1,117 @@
+/* Shared "proper document" look for printable/emailed business documents
+   (invoices, receipts, payslips) - deliberately a light theme independent
+   of the dark dashboard (styles.css), since these are read on a plain page
+   or printed to PDF, not used inside the dashboard UI itself. */
+
+body.doc-body {
+  background: #eef1f6;
+  color: #16202e;
+  font-family: Inter, Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding: 28px 16px;
+  line-height: 1.5;
+}
+
+.doc {
+  max-width: 720px;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 2px 14px rgba(16, 24, 38, 0.1);
+  padding: 34px 36px;
+}
+
+.doc-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 3px solid #2f6de6;
+  margin-bottom: 24px;
+}
+.doc-brand { display: flex; align-items: center; gap: 12px; }
+.doc-brand img { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+.doc-brand-name { font-size: 19px; font-weight: 800; color: #101826; line-height: 1.25; }
+.doc-brand-url { font-size: 12px; color: #7c8798; margin-top: 2px; }
+.doc-title { font-size: 30px; font-weight: 800; color: #101826; letter-spacing: 0.5px; white-space: nowrap; }
+
+.doc-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 26px;
+  flex-wrap: wrap;
+}
+.doc-meta-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #2f6de6;
+  margin-bottom: 3px;
+}
+.doc-billto-name { font-size: 15.5px; font-weight: 700; color: #101826; }
+.doc-billto-sub { font-size: 12.5px; color: #7c8798; margin-top: 6px; line-height: 1.6; }
+.doc-meta-right { text-align: right; display: grid; gap: 10px; }
+
+.doc-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+.doc-table thead th {
+  background: #101f38;
+  color: #ffffff;
+  text-align: left;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 11px 14px;
+}
+.doc-table tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #eceff3;
+  font-size: 13.5px;
+  color: #1d2733;
+}
+.doc-table .num { text-align: right; white-space: nowrap; }
+.doc-table tfoot td {
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 13.5px;
+  border-top: 1px solid #dfe4ea;
+}
+
+.doc-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #2f6de6;
+  color: #ffffff;
+  padding: 14px 18px;
+  border-radius: 6px;
+  margin: 16px 0 26px;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+.doc-banner.doc-banner-paid { background: #1f9d55; }
+.doc-banner .amount { font-size: 19px; font-weight: 800; }
+
+.doc-payment-details { margin-bottom: 22px; }
+.doc-payment-row { display: flex; gap: 10px; font-size: 13px; padding: 3px 0; }
+.doc-payment-row span:first-child { color: #7c8798; min-width: 140px; }
+.doc-payment-row span:last-child { color: #16202e; font-weight: 600; }
+
+.doc-footer { font-size: 12px; color: #7c8798; font-style: italic; line-height: 1.7; }
+
+@media print {
+  body.doc-body { background: #fff; padding: 0; }
+  .doc { box-shadow: none; border-radius: 0; max-width: none; padding: 10mm; }
+  @page { margin: 12mm; }
+  /* Belt-and-braces: the Print/Download buttons are also hidden by JS right
+     before window.print()/html2pdf() fire, but that depends on our onclick
+     handler actually running first. A client printing via their phone's own
+     share/print menu (bypassing our button entirely) never runs that JS, and
+     some mobile browsers don't reliably pick up a display:none applied the
+     instant before window.print(). This plain @media print rule hides
+     .no-print unconditionally, independent of any JS timing. */
+  .no-print { display: none !important; }
+}
